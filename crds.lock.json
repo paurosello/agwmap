@@ -1,0 +1,305 @@
+{
+  "sources": {
+    "agentgateway-enterprise": {
+      "crds": {
+        "agentgatewaybackends.agentgateway.dev": {
+          "kind": "AgentgatewayBackend",
+          "sha256": "3ffa813a176986e35256da0bb257c26f56ff00a5e80093184c8b9e75b9dc1fe3",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "agentgatewaymodels.agentgateway.dev": {
+          "kind": "AgentgatewayModel",
+          "sha256": "9f23619525903e7f11a19b86f50c43d03798966879e10e16b57114cfe6469297",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "agentgatewayparameters.agentgateway.dev": {
+          "kind": "AgentgatewayParameters",
+          "sha256": "6542d56eb1b352bd6bec02fff25ebb1830ad537277047c1bff8e7e8ad0384c45",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "agentgatewaypolicies.agentgateway.dev": {
+          "kind": "AgentgatewayPolicy",
+          "sha256": "d36ed5d92777f24a42fe5ca287f98833337365aa42055571fe815bb726ae5be3",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "authconfigs.extauth.solo.io": {
+          "kind": "AuthConfig",
+          "sha256": "0a746abfe25b5fae2efaea974cac68756816ed746dcda988ea8f4a667731b6bc",
+          "versions": [
+            "v1"
+          ]
+        },
+        "enterpriseagentgatewaybackends.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayBackend",
+          "sha256": "2e510aba2c0265ba14e38a8472a3830df27520b1a965584276e6b808d8bc8a54",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewaybudgets.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayBudget",
+          "sha256": "2d0eb2095353a237061d99642ac9e0e17807c478eab4fec9575234b74d0ceecf",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewayexternalsecrets.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayExternalSecret",
+          "sha256": "738efac4386c5f66d764f5994b8efe8db188aeb9e67e8a78ea4361078de476fb",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewayparameters.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayParameters",
+          "sha256": "873db935bcac2d810a9c435362a7f4c985b974c1ed0fd3571f1e3c3ad2efb706",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewaypolicies.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayPolicy",
+          "sha256": "78701a17ee29486b1445d5ac5fc24a3a8fe03dd9a9f604238f6746c51f6c506f",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewayrbacpolicies.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayRBACPolicy",
+          "sha256": "47802019708d17a4e68325d0dfcc79710281d582c2d5283c062cf225a324b6e7",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriseagentgatewayrolebindings.enterpriseagentgateway.solo.io": {
+          "kind": "EnterpriseAgentgatewayRoleBinding",
+          "sha256": "8724fe540a37e7b3a5e685f0f0b5647f49346c8e2e60f7e6cfda304de1f50e78",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "enterpriselistenersets.enterprise.solo.io": {
+          "kind": "EnterpriseListenerSet",
+          "sha256": "cec1312eed7ebaaaa1cad1cab54fcf82f89176850b1f767921d7dc53dcfcfa07",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "ratelimitconfigs.ratelimit.solo.io": {
+          "kind": "RateLimitConfig",
+          "sha256": "ab6996c572c6251c85fa056042d79f3465a851544c348d3172f4082e9b6fe8db",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "wafpolicies.waf.solo.io": {
+          "kind": "WAFPolicy",
+          "sha256": "9f7316257011f6f45319abae942602cd8a3b66efed58dfaf8de875d0ae471903",
+          "versions": [
+            "v1alpha1"
+          ]
+        }
+      },
+      "version": "v2026.11.0"
+    },
+    "gateway-api-experimental": {
+      "crds": {
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "kind": "BackendTLSPolicy",
+          "sha256": "ff1e3c10ae2f6ff672a705c1de121e13d20fd6499a9b0077794a96f9b6ecae59",
+          "versions": [
+            "v1",
+            "v1alpha3"
+          ]
+        },
+        "gatewayclasses.gateway.networking.k8s.io": {
+          "kind": "GatewayClass",
+          "sha256": "7fdd6d55b683dc991fe91d5cec94e8ee4ccdecd9961c77a4ee4cc679eef0da59",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "gateways.gateway.networking.k8s.io": {
+          "kind": "Gateway",
+          "sha256": "023ac25a0000c823c9fc670b18bf577306b08479439529289800b34724e4c04f",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "grpcroutes.gateway.networking.k8s.io": {
+          "kind": "GRPCRoute",
+          "sha256": "6839016fd03a9e2e3b9f467aab76c744ae29616da0d95c05e43d274aa31244bf",
+          "versions": [
+            "v1"
+          ]
+        },
+        "httproutes.gateway.networking.k8s.io": {
+          "kind": "HTTPRoute",
+          "sha256": "b08ae69f36807379c5e1186e0a4323e8d2a8a0ac65f189c4388cde1a891e446d",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "listenersets.gateway.networking.k8s.io": {
+          "kind": "ListenerSet",
+          "sha256": "207b82b2e7c2a51a3c6c828276f7922eaf2e52022cbcab94e61ded1d337eacb5",
+          "versions": [
+            "v1"
+          ]
+        },
+        "referencegrants.gateway.networking.k8s.io": {
+          "kind": "ReferenceGrant",
+          "sha256": "0ec674250cfc69d10ef9dd82ff1cbe43496dc09a326ff10dbefa38e2ef0ff53a",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "tcproutes.gateway.networking.k8s.io": {
+          "kind": "TCPRoute",
+          "sha256": "6acfe73ffe7428fc95fdc529ad0bd233750309ba01f5daf525f015b55583d9f5",
+          "versions": [
+            "v1",
+            "v1alpha2"
+          ]
+        },
+        "tlsroutes.gateway.networking.k8s.io": {
+          "kind": "TLSRoute",
+          "sha256": "fa534b1d0f375135814b8e32c32dd171c5893baed542333cc6f26cee3ef1e93e",
+          "versions": [
+            "v1",
+            "v1alpha2",
+            "v1alpha3"
+          ]
+        },
+        "udproutes.gateway.networking.k8s.io": {
+          "kind": "UDPRoute",
+          "sha256": "a978076f5f21b229ed776752242cd1eaedd25b21b6b9040e30c5ac565b3266fa",
+          "versions": [
+            "v1",
+            "v1alpha2"
+          ]
+        },
+        "xbackends.gateway.networking.x-k8s.io": {
+          "kind": "XBackend",
+          "sha256": "22f86410bdf6ab4c33d28c57540173a3c7f985221f87bd43fb5548a5fa49e284",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "xbackendtrafficpolicies.gateway.networking.x-k8s.io": {
+          "kind": "XBackendTrafficPolicy",
+          "sha256": "269a4d71d1e99f0e52b3c98f547d8f5ec08ea5faca545672d3bc1b81885ec435",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "xmeshes.gateway.networking.x-k8s.io": {
+          "kind": "XMesh",
+          "sha256": "bf94852c5057eaea1c1889e233a820fcfb390880a5e2dc0f9380999342583e23",
+          "versions": [
+            "v1alpha1"
+          ]
+        },
+        "xtelemetrypolicies.gateway.networking.x-k8s.io": {
+          "kind": "XTelemetryPolicy",
+          "sha256": "3234d4482f919a4289926ef85ab02af7a86a02c6cb90035f6811d3cdf9c27862",
+          "versions": [
+            "v1alpha1"
+          ]
+        }
+      },
+      "version": "v1.7.0"
+    },
+    "gateway-api-standard": {
+      "crds": {
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "kind": "BackendTLSPolicy",
+          "sha256": "c244c88de64990dda1b965343ea57c2ea51e84a7fcd9569f749c2047f9d86db0",
+          "versions": [
+            "v1"
+          ]
+        },
+        "gatewayclasses.gateway.networking.k8s.io": {
+          "kind": "GatewayClass",
+          "sha256": "7fdd6d55b683dc991fe91d5cec94e8ee4ccdecd9961c77a4ee4cc679eef0da59",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "gateways.gateway.networking.k8s.io": {
+          "kind": "Gateway",
+          "sha256": "99593ac7a80d837f71e1e05118eac66da58b632efcae52adebab664d4a3817e1",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "grpcroutes.gateway.networking.k8s.io": {
+          "kind": "GRPCRoute",
+          "sha256": "0d31859c5e9f4531c9b54b343cc90ccaa601a0d6c7255d22550a25bbbf03328a",
+          "versions": [
+            "v1"
+          ]
+        },
+        "httproutes.gateway.networking.k8s.io": {
+          "kind": "HTTPRoute",
+          "sha256": "fc1da60671ab508fed238199dd1a716e16123f3a0d920fdfc68fba4d654a3971",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "listenersets.gateway.networking.k8s.io": {
+          "kind": "ListenerSet",
+          "sha256": "ee7457db194cd6de2bad61c2483fca5c839b3f006a4d3ef50ecd7f9f2b708fc2",
+          "versions": [
+            "v1"
+          ]
+        },
+        "referencegrants.gateway.networking.k8s.io": {
+          "kind": "ReferenceGrant",
+          "sha256": "0ec674250cfc69d10ef9dd82ff1cbe43496dc09a326ff10dbefa38e2ef0ff53a",
+          "versions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "tcproutes.gateway.networking.k8s.io": {
+          "kind": "TCPRoute",
+          "sha256": "67e7de47509f94ccd3537cc6841c844d46ed8d6a3db1208687a19acafc61e71e",
+          "versions": [
+            "v1"
+          ]
+        },
+        "tlsroutes.gateway.networking.k8s.io": {
+          "kind": "TLSRoute",
+          "sha256": "168bc6d4324bb9106636130a0afdd9b3bd63ff6986192b9ca6a4b67d9cb22ed4",
+          "versions": [
+            "v1"
+          ]
+        },
+        "udproutes.gateway.networking.k8s.io": {
+          "kind": "UDPRoute",
+          "sha256": "49d5ab3c5372daa4384362cdb002c011a56a07135e1865c6ef14d814188a90e9",
+          "versions": [
+            "v1"
+          ]
+        }
+      },
+      "version": "v1.7.0"
+    }
+  }
+}

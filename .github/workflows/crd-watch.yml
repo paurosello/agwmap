@@ -1,0 +1,74 @@
+name: crd-watch
+
+# Once a day, compares the CRDs the map was last checked against (crds.lock.json)
+# with the latest Gateway API release, standard and experimental channels, and
+# the latest Solo Enterprise for agentgateway CRD chart. When a CRD was added,
+# removed or changed, the report goes into an issue labelled crd-drift. There is
+# one open issue at a time: a later run rewrites its body when the report is
+# different and leaves it alone when it is not. Nothing here closes the issue;
+# the change that commits the updated crds.lock.json does.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency: crd-watch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # A failure here (a source that cannot be fetched, a chart that does not
+      # render) fails the job, and that is the signal. Drift is not a failure.
+      - name: Compare the upstream CRDs with crds.lock.json
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPORT="${RUNNER_TEMP}/crd-report.md"
+          scripts/crds.sh check --report "${REPORT}"
+          test -s "${REPORT}" || { echo "crds.sh check wrote no report" >&2; exit 1; }
+          grep -qxE 'drift=(true|false)' "${GITHUB_OUTPUT}" || { echo "crds.sh check did not set the drift output" >&2; exit 1; }
+          cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Open or update the issue
+        if: steps.check.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LABEL: crd-drift
+          TITLE: Upstream CRDs changed
+        run: |
+          REPORT="${RUNNER_TEMP}/crd-report.md"
+
+          gh label create "${LABEL}" --force --color D93F0B \
+            --description "Upstream CRDs differ from crds.lock.json"
+
+          # The oldest open issue with the label, so that the choice is stable
+          # if there is ever more than one.
+          number="$(gh issue list --label "${LABEL}" --state open --limit 100 \
+            --json number --jq 'sort_by(.number) | .[0].number // empty')"
+
+          if [ -z "${number}" ]; then
+            gh issue create --title "${TITLE}" --label "${LABEL}" --body-file "${REPORT}"
+            exit 0
+          fi
+
+          # Compared without carriage returns and trailing newlines, which
+          # GitHub and gh may add or drop; anything else is a real difference.
+          current="$(gh issue view "${number}" --json body --jq '.body' | tr -d '\r')"
+          report="$(tr -d '\r' < "${REPORT}")"
+          if [ "${current}" = "${report}" ]; then
+            echo "Issue #${number} already holds this report."
+            exit 0
+          fi
+
+          gh issue edit "${number}" --body-file "${REPORT}"
+          gh issue comment "${number}" --body "The upstream CRDs changed again. The description above now holds the report of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}."

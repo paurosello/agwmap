@@ -181,6 +181,15 @@ go test ./...      # builds the binary and runs it against a fake API server tha
 scripts/e2e.sh     # the same against a kind cluster with examples/demo.yaml (needs kind, helm, jq)
 ```
 
+## Keeping up with the CRDs
+
+[`crds.lock.json`](crds.lock.json) records the versions and fingerprints of the CRDs the map was last
+checked against. A [daily workflow](.github/workflows/crd-watch.yml) compares them with the latest
+Gateway API release and the latest Solo Enterprise for agentgateway CRD chart, and opens an issue
+labelled `crd-drift` when a CRD was added, removed or changed. `scripts/crds.sh diff` shows what
+changed, and `scripts/crds.sh update` records the new baseline once the map handles it; committing the
+updated lock file is what stops the issue from being raised again.
+
 ## License
 
 [Apache-2.0](LICENSE)
