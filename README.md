@@ -1,0 +1,115 @@
+# agwmap
+
+agwmap reads the gateway configuration of a Kubernetes cluster and turns it into one self-contained
+HTML page that shows what happens to a request: which listener takes it, which policies apply at each
+level, which route matches, and where it ends up.
+
+![The request flow of one route: listener, gateway policies, route, route policies, backends](docs/screenshot.png)
+
+## How it helps
+
+- **Understand a setup you did not build.** Pick a route and read the path top to bottom: listener,
+  gateway policies, route, route policies, backends and their upstream targets. Authentication, rate
+  limits, guardrails, token exchange and the rest are labelled by what they do.
+- **Find what is wrong or unused.** Objects with a failing status condition are flagged, as are
+  cross-namespace references without a ReferenceGrant and settings configured at more than one level.
+  Everything that no request reaches (dangling policies, unused backends) is listed in its own tab.
+- **Share it without the identifying details.** By default hostnames, URLs, IP addresses, account and
+  client ids and inline credentials are replaced with stable pseudonyms, and only gateway labels and
+  annotations are kept. Object names and namespaces stay, because the map is unreadable without them:
+  see [what a capture keeps](#what-a-capture-keeps) before you send one. The Raw tab shows exactly what
+  a capture holds.
+- **Read-only.** agwmap discovers the gateway API groups and lists their objects, nothing else.
+  Secrets, ConfigMaps and Services are never read; they only appear as names that something refers to.
+- **Look at someone else's cluster without access to it.** They run agwmap, export a snapshot file and
+  send it; you render the same page from that file.
+
+It covers the Gateway API and agentgateway (open source and enterprise), including inference pools.
+kgateway objects are read too, but that path has not been tested yet.
+
+## Install
+
+As a kubectl plugin, with [krew](https://krew.sigs.k8s.io/):
+
+```sh
+kubectl krew index add agwmap https://github.com/paurosello/agwmap.git
+kubectl krew install agwmap/agwmap
+```
+
+Or download the archive for your platform from the
+[releases](https://github.com/paurosello/agwmap/releases) and put `kubectl-agwmap` on your `PATH`.
+
+Or with Go, which gives a binary named `agwmap`:
+
+```sh
+go install github.com/paurosello/agwmap@latest
+```
+
+## Use it
+
+```sh
+kubectl agwmap                                  # current kube context -> agwmap.html, anonymized
+kubectl agwmap --context prod -n team-a -o a.html
+kubectl agwmap -o snapshot.json                 # capture only, to send to someone
+kubectl agwmap -from snapshot.json -o a.html    # render a capture you received
+kubectl agwmap -anonymize=false                 # keep the real values
+```
+
+The binary works the same under any name, for example `agwmap -o a.html`.
+
+| Flag | |
+|---|---|
+| `--context`, `--kubeconfig` | Which cluster to read. Default: the current context. |
+| `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
+| `-o` | Output file, `agwmap.html` by default; `-` writes the page to stdout. A name ending in `.json` writes a snapshot instead of the page. |
+| `-from` | Render a snapshot file instead of reading a cluster. |
+| `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a snapshot that was not. |
+| `-version` | Print the version. |
+
+agwmap needs permission to list the objects of the gateway API groups. A kind it may not list is left
+out and named in a warning at the top of the page.
+
+To try it without a gateway of your own, apply [`examples/demo.yaml`](examples/demo.yaml) to a cluster
+that has the Gateway API and agentgateway CRDs.
+
+## What a capture keeps
+
+Of each object: `apiVersion`, `kind`, its name and namespace, `spec`, and `status` without timestamps.
+The rest of `metadata` is dropped.
+
+With anonymization, which is the default:
+
+| Replaced with a pseudonym, or removed | Kept |
+|---|---|
+| Hostnames, wherever they appear, and IPv4 and IPv6 addresses | Names and namespaces of the objects |
+| URLs: the host, path segments other than well-known words such as `/v1` or `/oauth2`, the query string | Names of what they refer to: Secrets, Services, models |
+| E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
+| Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
+| Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |
+| The kube context name, and the user and server named in warnings | |
+
+Anonymization works by recognising values, so it can miss one it has no rule for, and it does not try
+to hide what your objects are called. If a name gives away more than you want to share, or you find a
+value that should have been replaced, look at the Raw tab before sending the file, and please
+[open an issue](https://github.com/paurosello/agwmap/issues) (without the value). The rules are at the
+top of [`anonymize.go`](anonymize.go).
+
+With `-anonymize=false` nothing is replaced and all labels and annotations are kept.
+
+## Limits
+
+- Kubernetes objects only: a standalone agentgateway config file is not read.
+- One cluster per page.
+- When the same setting is configured at several levels, the page shows all of them but does not work
+  out which one takes effect.
+
+## Development
+
+```sh
+go test ./...      # builds the binary and runs it against a fake API server that serves testdata/
+scripts/e2e.sh     # the same against a kind cluster with examples/demo.yaml (needs kind, helm, jq)
+```
+
+## License
+
+[Apache-2.0](LICENSE)

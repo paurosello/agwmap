@@ -1,0 +1,130 @@
+# Cases that need CRDs or mesh features the kind lab does not have, so they are
+# only rendered from a snapshot (agwmap -from), never applied:
+# an InferencePool backend, route delegation, a route attached to a Service,
+# a backend that is another gateway, and the same setting at two levels.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: front, namespace: demo}
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - {name: http, port: 80, protocol: HTTP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: models, namespace: demo}
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - {name: http, port: 8080, protocol: HTTP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: intake, namespace: demo}
+spec:
+  parentRefs: [{name: front}]
+  rules:
+  - name: to-models
+    matches: [{path: {type: PathPrefix, value: /v1}}]
+    backendRefs:
+    - {name: models, port: 8080}   # the proxy Service of the other gateway
+  - name: teams
+    matches: [{path: {type: PathPrefix, value: /teams}}]
+    backendRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: team-a}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: team-a-apps, namespace: team-a}
+spec:
+  parentRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: intake, namespace: demo}
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /teams/a}}]
+    backendRefs:
+    - {name: app, port: 8080}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: pool-route, namespace: demo}
+spec:
+  parentRefs: [{name: models}]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /}}]
+    backendRefs:
+    - {group: inference.networking.k8s.io, kind: InferencePool, name: vllm-pool}
+---
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata: {name: vllm-pool, namespace: demo}
+spec:
+  selector:
+    matchLabels: {app: vllm}
+  targetPorts:
+  - number: 8000
+  endpointPickerRef:
+    name: vllm-epp
+    port: {number: 9002}
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceObjective
+metadata: {name: interactive, namespace: demo}
+spec:
+  priority: 10
+  poolRef: {group: inference.networking.k8s.io, kind: InferencePool, name: vllm-pool}
+---
+# Mesh: attached to a Service, not to a gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: bank-refunds, namespace: bank}
+spec:
+  parentRefs: [{group: "", kind: Service, name: bank-gw, port: 8080}]
+  rules:
+  - backendRefs:
+    - {name: refunds, port: 8080}
+---
+# The same setting at gateway and at route level, and a phase.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: front-jwt, namespace: demo}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: front}]
+  traffic:
+    phase: PreRouting
+    jwtAuthentication:
+      mode: Strict
+      providers:
+      - {issuer: https://login.acme.test, jwks: {remote: {jwksPath: /certs, backendRef: {name: idp, namespace: identity, port: 443}}}}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: intake-jwt-optional, namespace: demo}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: intake}]
+  traffic:
+    jwtAuthentication:
+      mode: Optional
+      providers:
+      - {issuer: https://login.acme.test, jwks: {remote: {jwksPath: /certs, backendRef: {name: idp, namespace: identity, port: 443}}}}
+---
+# A policy on a Service that is only referred to by another policy.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: idp-timeout, namespace: identity}
+spec:
+  targetRefs: [{group: "", kind: Service, name: idp}]
+  backend:
+    http: {requestTimeout: 2s}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: app-elicitation, namespace: team-a}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: team-a-apps}]
+  backend:
+    entElicitation:
+      secretName: upstream-oauth-client
+    mcp:
+      guardrails:
+        processors:
+        - expression: {condition: 'mcp.tool.name == "drop_table"', reject: blocked}

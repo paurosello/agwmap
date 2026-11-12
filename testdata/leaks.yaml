@@ -1,0 +1,83 @@
+# Values that anonymization must not let through, each in a place where nothing
+# but the value itself, or a sibling field, says what it is. e2e_test.go captures
+# this file and fails when one of them is still in the output. Everything here
+# is invented.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: leaks
+  namespace: leak-test
+  labels: {site: edge.leak-corp.com, team: payments}
+  annotations:
+    agentgateway.dev/owner: ops@leak-corp.com
+    billing.leak-corp.com/cost-center: "4711" # not a gateway annotation: dropped
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - {name: https, port: 443, protocol: HTTPS, hostname: "*.leak-corp.com"}
+  addresses:
+  - {type: IPAddress, value: "2600:1f18:aaaa:bbbb::17"}
+status:
+  addresses:
+  - {type: IPAddress, value: 203.0.113.77}
+  conditions:
+  - type: Accepted
+    status: "False"
+    reason: failed to resolve ext-auth.leak-ns.svc.cluster.local:8083
+    message: hostname "portal.leak-corp.com" conflicts with the listener on 2600:1f18:aaaa:bbbb::17
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: leaks, namespace: leak-test}
+spec:
+  parentRefs: [{name: leaks}]
+  hostnames: [portal.leak-corp.com]
+  rules:
+  - matches:
+    - headers: [{name: Host, value: partner.leak-corp.ai}]
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - {name: Authorization, value: Bearer leak-bearer-0123456789abcdef}
+        - {name: x-api-key, value: leak-apikey-plain}
+        add:
+        - {name: x-upstream, value: sk-leak-0123456789abcdefghij}
+        - {name: x-route, value: partner.leak-corp.ai}
+    backendRefs: [{name: leaks, port: 80}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata: {name: leaks-grpc, namespace: leak-test}
+spec:
+  parentRefs: [{name: leaks}]
+  rules:
+  - matches:
+    - method: {service: com.leakcorp.orders.v1.Orders, method: Get}
+    backendRefs: [{name: leaks, port: 9090}]
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: leaks, namespace: leak-test}
+spec:
+  targetSelectors:
+  - {group: gateway.networking.k8s.io, kind: Gateway, matchLabels: {site: edge.leak-corp.com}}
+  traffic:
+    jwtAuthentication:
+      providers:
+      - issuer: https://login.microsoftonline.com/8f3c1e2a-1111-4222-8333-444455556666/v2.0
+        audiences: [0a1b2c3d-aaaa-4bbb-8ccc-ddddeeeeffff]
+        jwks:
+          remote:
+            jwksUri: https://oidc.eks.eu-west-1.amazonaws.com/id/LEAKCLUSTERID0123456789/keys?api_key=leak-query-secret#frag
+    authorization:
+      policy:
+        matchExpressions:
+        - request.host == "portal.leak-corp.com" && jwt.email.endsWith("@leak-corp.com")
+    extAuth:
+      headers: {Authorization: Basic bGVhay11c2VyOmxlYWstcGFzc3dvcmQ=}
+  backend:
+    aws: {roleArn: "arn:aws:iam::123456789012:role/leak-corp-bedrock", accountId: 123456789012}
+    gcp: {model: projects/leak-corp-ml-4711/locations/us-central1/publishers/google/models/gemini-2.5-flash}
+    export: gs://leak-corp-bucket/exports/2026
+    upstreamKey: ghp_leak0123456789abcdefghij

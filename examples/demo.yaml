@@ -1,0 +1,104 @@
+# A small gateway setup to try agwmap on: one gateway with two listeners, a
+# route to plain Services (one of them in another namespace, allowed by a
+# ReferenceGrant), a route to an LLM backend, and two policies.
+#
+#   kubectl apply -f examples/demo.yaml
+#   kubectl agwmap -n agwmap-demo
+#
+# It needs the Gateway API and agentgateway CRDs, but no controller: agwmap
+# reads the objects, it does not need them to be programmed. scripts/e2e.sh
+# applies this file to a kind cluster and checks what agwmap captures.
+apiVersion: v1
+kind: Namespace
+metadata: {name: agwmap-demo}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: agwmap-demo-reviews}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: demo, namespace: agwmap-demo}
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+  - name: https
+    port: 443
+    protocol: HTTPS
+    hostname: "*.demo-company.test"
+    tls:
+      certificateRefs: [{name: wildcard-tls}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: shop, namespace: agwmap-demo}
+spec:
+  parentRefs: [{name: demo, sectionName: https}]
+  hostnames: [shop.demo-company.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /reviews}}]
+    backendRefs:
+    - {name: reviews, namespace: agwmap-demo-reviews, port: 8080}
+  - matches: [{path: {type: PathPrefix, value: /}}]
+    backendRefs:
+    - {name: shop, port: 8080, weight: 90}
+    - {name: shop-canary, port: 8080, weight: 10}
+---
+# Lets routes in agwmap-demo use the reviews Service of this namespace.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: {name: shop-to-reviews, namespace: agwmap-demo-reviews}
+spec:
+  from:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: agwmap-demo}
+  to:
+  - {group: "", kind: Service, name: reviews}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: openai, namespace: agwmap-demo}
+spec:
+  ai:
+    provider:
+      openai: {model: gpt-4o}
+  policies:
+    auth:
+      secretRef: {name: openai-api-key}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: chat, namespace: agwmap-demo}
+spec:
+  parentRefs: [{name: demo, sectionName: https}]
+  hostnames: [ai.demo-company.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /v1/chat}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: openai}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: demo-observability, namespace: agwmap-demo}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: demo}
+  frontend:
+    accessLog:
+      attributes:
+        add:
+        - {name: team, expression: 'request.headers["x-team"]'}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: openai-upstream, namespace: agwmap-demo}
+spec:
+  targetRefs:
+  - {group: agentgateway.dev, kind: AgentgatewayBackend, name: openai}
+  backend:
+    tls:
+      sni: api.openai.com
+    http:
+      requestTimeout: 120s

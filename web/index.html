@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agwmap</title>
+<style>
+/* A dark blueprint: flat panels on a grid, one accent colour per kind of object and of setting. */
+:root{
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --font:"Avenir Next","Segoe UI",system-ui,sans-serif; --radius:2px; --shadow:3px 3px 0 #2a2340;
+  --bg:#130f1b; --grid:#1a1526; --panel:#1b1727; --soft:#27243d; --ink:#edeef7; --mut:#a3a6ba;
+  --line:#5c5478; --hair:color-mix(in srgb,var(--line) 55%,transparent);
+  --accent:#6a45c4; --key:#b9a2ee; --onaccent:#fff;
+  --gateway:#6fb9dc; --route:#b09be0; --backend:#8f99d8; --policy:#d98aa8; --external:#8b8e9d;
+  --authn:#7cc9a4; --authz:#6dbdb4; --ratelimit:#dcb47a; --guardrails:#d98aa8; --transform:#b09be0;
+  --resilience:#6fb9dc; --identity:#86cfc4; --security:#8f99d8; --observability:#a3a6ba;
+  --extension:#d49ab8; --connection:#a3a6ba; --other:#a3a6ba; --ok:#7cc9a4; --bad:#e08aa6;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:13px/1.45 var(--font);background:var(--bg);background-size:24px 24px;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px)}
+button,input{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 16px;box-shadow:0 2px 0 #2a2340}
+header h1{font-family:var(--mono);font-size:1.15em;margin:0;text-transform:uppercase;letter-spacing:.12em}
+header .meta{color:var(--mut);font-size:.92em}
+.tabs{display:flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.tabs button{border:0;background:none;padding:6px 12px;cursor:pointer;border-right:1px solid var(--line)}
+.tabs button:last-child{border-right:0}
+.tabs button.on{background:color-mix(in srgb,var(--accent) 55%,var(--panel));color:var(--onaccent)}
+#q{min-width:200px;margin-left:auto;padding:6px 10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg)}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:var(--radius);padding:6px 12px;cursor:pointer}
+.btn:hover{border-color:var(--gateway)}
+.state{font-size:.88em;border-radius:var(--radius);padding:2px 9px;border:1px solid var(--ok);color:var(--ok)}
+.state.raw{border-color:var(--bad);color:var(--bad)}
+main{padding:16px}
+.warn{background:color-mix(in srgb,var(--ratelimit) 14%,var(--panel));border:1px solid var(--ratelimit);
+  border-radius:var(--radius);padding:8px 12px;margin-bottom:12px}
+.mut{color:var(--mut)} .mono{font-family:var(--mono);font-size:.92em}
+.empty{color:var(--mut);font-style:italic}
+[data-open]{cursor:pointer}
+.tag{display:inline-block;padding:0 7px;border:1px solid color-mix(in srgb,var(--c,var(--other)) 60%,var(--panel));border-radius:var(--radius);
+  font-family:var(--mono);font-size:.85em;line-height:16px;white-space:nowrap;color:var(--c,var(--ink));
+  background:color-mix(in srgb,var(--c,var(--other)) 10%,var(--panel))}
+.badge{font-size:.8em;border:1px solid var(--line);border-radius:var(--radius);padding:0 5px;color:var(--mut)}
+pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;overflow:auto;
+  font-family:var(--mono);font-size:.88em;line-height:1.5}
+pre .y{color:var(--key)}
+
+.flowwrap{display:grid;grid-template-columns:300px minmax(0,1fr);gap:18px;align-items:start}
+.tree{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px;position:sticky;top:calc(var(--hh,48px) + 16px);
+  max-height:calc(100vh - var(--hh,48px) - 36px);overflow:auto;box-shadow:var(--shadow)}
+/* Narrow windows: one column, and nothing sticks, so the header cannot cover the page. */
+@media (max-width:800px){
+  header{position:static}
+  .flowwrap{grid-template-columns:minmax(0,1fr)}
+  .tree{position:static;max-height:45vh}
+}
+.tree .g{font-weight:600;padding:5px 6px;cursor:pointer;display:flex;gap:6px;align-items:baseline;border-radius:var(--radius);user-select:none}
+.tree .g:hover{background:var(--soft)}
+.tree .g .caret{color:var(--key);width:16px;flex:none;font-size:1.35em;line-height:1;align-self:center}
+.tree .g .n{margin-left:auto;color:var(--mut);font-weight:400;font-family:var(--mono);font-size:.85em}
+.tree .l{padding:6px 6px 2px 14px;color:var(--mut);font-family:var(--mono);font-size:.88em}
+.tree .r{padding:4px 6px 4px 24px;border-radius:calc(var(--radius) - 1px);cursor:pointer}
+.tree .r:hover{background:var(--soft)}
+.tree .r.on{background:color-mix(in srgb,var(--accent) 45%,var(--panel));color:var(--onaccent);box-shadow:inset 3px 0 0 var(--key)}
+.tree .r small{display:block;opacity:.75;font-family:var(--mono);font-size:.85em;word-break:break-all}
+.flow{max-width:900px}
+.stage{position:relative;padding:0 0 18px 30px;border-left:1px solid var(--line);margin-left:11px}
+.stage:last-child{border-left-color:transparent}
+.stage>.dot{position:absolute;left:-11.5px;top:0;width:22px;height:22px;border:1px solid var(--sc,var(--line));border-radius:var(--radius);
+  background:color-mix(in srgb,var(--sc,var(--mut)) 14%,var(--bg));color:var(--sc,var(--ink));font-size:11px;font-weight:700;display:grid;place-items:center}
+.stage>h4{margin:0 0 6px;font-family:var(--mono);font-size:.85em;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);line-height:22px}
+.card{background:var(--panel);border:1px solid var(--line);border-left-color:var(--rc,var(--line));border-radius:var(--radius);
+  margin-bottom:8px;box-shadow:var(--shadow);overflow:hidden}
+.card:hover{border-color:var(--key);box-shadow:4px 4px 0 var(--accent)}
+.card .t{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;padding:6px 12px;border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--rc,var(--mut)) 13%,var(--panel))}
+.card .t:last-child{border-bottom:0}
+.card .t .st{font-family:var(--mono);font-size:.85em;color:var(--rc,var(--ink))}
+.card .t b{font-size:1.04em}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 10px;margin:8px 12px;font-family:var(--mono);font-size:.88em}
+.kv span:nth-child(odd){color:var(--mut)}
+.kv span{word-break:break-all}
+.feat{padding:8px 12px;border-top:1px dashed var(--hair)}
+.t+.feat{border-top:0}
+.feat .fh{display:flex;gap:8px;align-items:center;margin-bottom:5px}
+.feat .fh .sv{font-family:var(--mono);font-size:.88em}
+.feat pre{border-color:var(--hair);cursor:text}
+.feat summary{cursor:pointer;color:var(--mut);font-family:var(--mono);font-size:.88em;padding:2px 0 4px}
+.branch{border:1px dashed var(--line);border-radius:var(--radius);padding:10px 12px 2px;margin-bottom:10px;
+  background:color-mix(in srgb,var(--panel) 70%,transparent)}
+.branch>h5{margin:0 0 8px;font-size:.92em}
+.sub{margin-left:22px}
+.uses{display:flex;flex-wrap:wrap;gap:5px 6px;align-items:center;margin:-2px 0 10px 12px;font-size:.88em}
+.uses .ct{color:var(--mut);font-size:.9em;text-transform:uppercase;letter-spacing:.06em}
+.chip{border:1px dashed var(--line);border-radius:2px;padding:1px 7px;font-family:var(--mono);background:var(--panel)}
+.chip:hover{border-color:var(--key)}
+.chip .k{color:var(--mut)}
+.chip .badge{margin-left:6px}
+.badge.bad{border-color:var(--bad);color:var(--bad)}
+.badge.go{border-color:var(--gateway);color:var(--gateway)}
+.badge.also{border-color:var(--ratelimit);color:var(--ratelimit);margin-left:auto}
+.feat.filter{margin:0 0 8px;padding:0 0 8px;border-top:0;border-bottom:1px dashed var(--hair)}
+
+.tw{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 10px;border-bottom:1px solid var(--hair);vertical-align:top;text-align:left}
+th{background:var(--soft);font-size:.85em;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+tr.grp td{background:var(--soft);font-weight:600}
+tr.grp td span{font-weight:400;color:var(--mut);margin-left:6px}
+tbody tr[data-open]:hover{background:var(--soft)}
+td.num{text-align:right;font-family:var(--mono);font-size:.92em;color:var(--mut)}
+.ok{color:var(--ok)} .no{color:var(--bad)}
+.rawbar{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+#rawtext{background:var(--panel);padding:12px 14px;white-space:pre;font-size:.92em}
+
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);background:var(--panel);border-left:1px solid var(--line);
+  box-shadow:-4px 0 0 #2a2340;z-index:40;display:none;flex-direction:column}
+#drawer.on{display:flex}
+#drawer .dh{padding:12px 16px;border-bottom:1px solid var(--line);border-top:3px solid var(--rc,var(--external))}
+#drawer .dh .st{font-family:var(--mono);font-size:.88em;color:var(--rc,var(--mut))}
+#drawer .dh h2{margin:2px 0 0;font-size:1.3em;word-break:break-word}
+#drawer .x{position:absolute;top:10px;right:12px;border:0;background:none;font-size:20px;cursor:pointer;color:var(--mut)}
+#drawer .db{overflow:auto;padding:12px 16px;flex:1}
+#drawer h3{font-size:.85em;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:16px 0 6px}
+#drawer h3:first-child{margin-top:0}
+.feats{display:flex;flex-wrap:wrap;gap:6px 12px}
+.rel{display:flex;gap:8px;align-items:baseline;padding:3px 6px;border-radius:5px}
+.rel:hover{background:var(--soft)}
+.rel .ty{font-size:.8em;color:var(--mut);width:60px;flex:none;text-transform:uppercase;letter-spacing:.04em}
+.rel .k{font-family:var(--mono);font-size:.85em;color:var(--mut)}
+.cond{font-family:var(--mono);font-size:.88em;padding:2px 0}
+.copy{float:right;border:1px solid var(--line);background:var(--panel);border-radius:5px;padding:1px 8px;cursor:pointer;font-size:.85em}
+
+</style>
+</head>
+<body>
+<header>
+  <h1>agwmap</h1>
+  <span class="meta" id="meta"></span>
+  <span class="state" id="state"></span>
+  <div class="tabs" id="tabs">
+    <button data-v="flow">Request flow</button>
+    <button data-v="resources">Resources</button>
+    <button data-v="outside">Outside the flow</button>
+    <button data-v="raw">Raw</button>
+  </div>
+  <input id="q" type="search" placeholder="Filter by name, namespace, host…">
+  <button class="btn" id="export" title="Download the captured objects as a snapshot file. Render it again with: agwmap -from FILE">Export snapshot</button>
+</header>
+<main><div id="warn"></div><div id="view"></div></main>
+<aside id="drawer"></aside>
+<script id="data" type="application/json">__GWMAP_DATA__</script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const push = (m, k, x) => { const a = m.get(k); a ? a.push(x) : m.set(k, [x]); }; // add to a Map of lists
+const D = JSON.parse($("data").textContent);
+// The header wraps when it runs out of width; what sticks below it follows its height.
+new ResizeObserver(([e]) => document.documentElement.style.setProperty("--hh", e.target.offsetHeight + "px"))
+  .observe(document.querySelector("header"));
+const N = new Map(D.nodes.map(n => [n.id, n]));
+const OUT = new Map(), IN = new Map();
+for (const e of D.edges) { push(OUT, e.from, e); push(IN, e.to, e); }
+const outE = id => OUT.get(id) || [], inE = id => IN.get(id) || [];
+const byRole = r => D.nodes.filter(n => n.role === r);
+const spec = n => (n.obj && n.obj.spec) || {};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const get = (o, path) => path.split(".").reduce((a, k) => a == null ? a : a[k], o);
+const CAT = {authn:"AuthN", authz:"AuthZ", ratelimit:"Rate limit", guardrails:"Guardrails", transform:"Transform",
+  identity:"Identity", resilience:"Resilience", security:"TLS / CORS", observability:"Observability",
+  extension:"Extensions", connection:"Connection", other:"Other"};
+const tag = f => `<span class="tag" style="--c:var(--${f.cat})">${esc(CAT[f.cat])}</span>`;
+const rc = n => `--rc:var(--${["gateway","route","backend","policy"].includes(n.role) ? n.role : n.role === "listenerset" ? "gateway" : "external"})`;
+
+/* ---------- model ---------- */
+const gateways = byRole("gateway"), routes = byRole("route");
+// policies attached to an object: [{p, section}]
+const polsOn = id => inE(id).filter(e => e.type === "target").map(e => ({p: N.get(e.from), section: e.section || ""}));
+// listener sets that add listeners to a gateway
+const listenerSets = g => inE(g.id).filter(e => e.type === "parent" && N.get(e.from).role === "listenerset").map(e => N.get(e.from));
+// every listener of a gateway: its own and those of its listener sets: [{l, via}]
+const listenersOf = g => [...(spec(g).listeners || []).map(l => ({l, via: null})),
+  ...listenerSets(g).flatMap(ls => (spec(ls).listeners || []).map(l => ({l, via: ls})))];
+// where a route attaches, directly or through a listener set: [{gw, via, section}]
+// A route can also hang under another route (delegation): by naming it as its
+// parent, or by being a backend of one of its rules. Those carry viaRoute.
+function parentsOf(r, seen = new Set()) {
+  if (seen.has(r.id)) return [];
+  seen.add(r.id);
+  const ups = [...outE(r.id).filter(e => e.type === "parent").map(e => ({p: N.get(e.to), section: e.section || "", port: (get(r.obj, e.path || "") || {}).port})),
+    ...inE(r.id).filter(e => e.type === "backend" && N.get(e.from).role === "route").map(e => ({p: N.get(e.from), section: ""}))];
+  return ups.flatMap(({p, section, port}) => {
+    if (p.role === "gateway") return [{gw: p, via: null, section, port}];
+    if (p.role === "route") return parentsOf(p, seen).map(x => ({...x, viaRoute: p}));
+    if (p.role !== "listenerset") return [];
+    const up = outE(p.id).find(x => x.type === "parent" && N.get(x.to).role === "gateway");
+    return up ? [{gw: N.get(up.to), via: p, section, port}] : [];
+  });
+}
+const isChildRoute = r => outE(r.id).some(e => e.type === "parent" && N.get(e.to).role === "route") || inE(r.id).some(e => e.type === "backend" && N.get(e.from).role === "route");
+// Services a route is attached to: mesh traffic addressed to that Service
+const serviceParents = r => outE(r.id).filter(e => e.type === "parent" && N.get(e.to).kind === "Service").map(e => N.get(e.to));
+// Whether a listener takes a route that names its gateway or listener set as parent:
+// the sectionName and port of the parentRef, the kind of route against the protocol
+// (or against allowedRoutes.kinds), and allowedRoutes.namespaces, which defaults to
+// the listener's own namespace. A namespace selector is not evaluated, because
+// namespaces are not captured: such a listener is shown with every route.
+const ROUTE_PROTOCOLS = {HTTPRoute: ["HTTP", "HTTPS"], GRPCRoute: ["HTTP", "HTTPS"], TLSRoute: ["TLS"], TCPRoute: ["TCP"], UDPRoute: ["UDP"]};
+function accepts(le, owner, r, p) {
+  const l = le.l, allowed = l.allowedRoutes || {};
+  if (p.section && p.section !== l.name) return false;
+  if (p.port && p.port !== l.port) return false;
+  if ((allowed.kinds || []).length) { if (!allowed.kinds.some(k => k.kind === r.kind)) return false; }
+  else if (ROUTE_PROTOCOLS[r.kind] && ["HTTP", "HTTPS", "TLS", "TCP", "UDP"].includes(l.protocol) && !ROUTE_PROTOCOLS[r.kind].includes(l.protocol)) return false;
+  return ((allowed.namespaces || {}).from || "Same") !== "Same" || r.ns === owner.ns;
+}
+const routesOf = (g, le) => routes.filter(r => parentsOf(r).some(p => !p.viaRoute && p.gw === g && p.via === le.via && accepts(le, le.via || g, r, p)));
+// The proxy Service of a gateway carries the gateway's name, so a backend that
+// is such a Service means the request continues at that gateway.
+const gatewayBehind = o => o.kind === "Service" ? gateways.find(g => g.name === o.name && g.ns === o.ns) : null;
+// backends of a route per rule: Map(ruleIndex -> [{b, weight, e}])
+function ruleBackends(r) {
+  const m = new Map();
+  for (const e of outE(r.id)) {
+    const x = e.type === "backend" && /rules\.(\d+)\.backendRefs\.(\d+)$/.exec(e.path || "");
+    if (!x) continue; // a backendRef inside a filter (mirror) is shown with the filter
+    const ref = get(spec(r), `rules.${x[1]}.backendRefs.${x[2]}`);
+    push(m, +x[1], {b: N.get(e.to), weight: ref && ref.weight, e});
+  }
+  // objects that name the route as their parent (AgentgatewayModel)
+  for (const e of inE(r.id)) {
+    const b = N.get(e.from);
+    if (e.type !== "parent" || b.role !== "backend") continue;
+    if (![...m.values()].flat().some(x => x.b === b)) push(m, 0, {b, e});
+  }
+  return m;
+}
+// upstream targets of a backend, read from its spec: [{name, where, proto}]
+function targetsOf(b) {
+  const s = spec(b), out = [];
+  const st = t => t.static || t;
+  const host = t => { const x = st(t); return x.backendRef ? `Service/${x.backendRef.name}${x.port ? ":" + x.port : ""}${x.path || ""}`
+    : `${x.host || x.unixPath || ""}${x.port ? ":" + x.port : ""}${x.path || ""}`; };
+  for (const k of ["mcp", "entMcp"]) for (const t of (s[k] && s[k].targets) || [])
+    out.push({name: t.name, where: t.selector ? "services selected by label" : host(t), proto: (t.static && t.static.protocol) || "MCP"});
+  if (s.ai) {
+    const provs = s.ai.provider ? [s.ai.provider] : (s.ai.groups || []).flatMap((g, i) => (g.providers || []).map(p => ({...p, _group: i + 1})));
+    for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";
+      out.push({name: p.name || k, where: [k, p[k] && p[k].model, p[k] && p[k].region, p.host].filter(Boolean).join(" · "), proto: p._group ? `LLM · priority ${p._group}` : "LLM"}); }
+  }
+  if (s.static) out.push({name: "static", where: host(s.static), proto: "HTTP"});
+  if (s.a2a) out.push({name: "a2a", where: host(s.a2a), proto: "A2A"});
+  for (const [k, v] of Object.entries(s.aws || {})) // agentCore: runtime ARN, region, account
+    out.push({name: k, where: Object.entries(v || {}).filter(x => typeof x[1] !== "object").map(x => `${x[0]}=${x[1]}`).join(" · "), proto: "AWS"});
+  if (b.kind === "InferencePool") {
+    const sel = Object.entries(get(s, "selector.matchLabels") || {}).map(x => x.join("=")).join(","), pick = s.endpointPickerRef || s.extensionRef;
+    out.push({name: "pods", where: `${sel || "all pods"} :${(s.targetPorts || []).map(p => p.number).join(",") || s.targetPortNumber || ""}`, proto: "selected by label"});
+    if (pick) out.push({name: "endpoint picker", where: `Service/${pick.name}${pick.port ? ":" + (pick.port.number || pick.port) : ""}`, proto: "chooses the pod per request"});
+  }
+  for (const k of ["mcp", "entMcp"]) { // how the MCP backend behaves, beyond its targets
+    const modes = Object.entries(s[k] || {}).filter(x => x[0] !== "targets").map(([key, v]) => `${key}=${typeof v === "object" ? Object.keys(v).join("+") || "on" : v}`);
+    if (modes.length) out.push({name: "settings", where: modes.join(" · "), proto: k});
+  }
+  if (s.dynamicForwardProxy) out.push({name: "dynamic", where: "dynamic forward proxy", proto: "HTTP"});
+  if (b.kind.endsWith("Model")) {
+    const vm = s.virtualModel && Object.keys(s.virtualModel)[0];
+    out.push({name: (s.match && s.match.model) || b.name, where: vm ? `virtual model · ${vm}` : s.baseURL || "", proto: s.provider || "LLM"});
+  }
+  return out;
+}
+const matchText = m => {
+  const p = m.path ? `${m.path.type || "PathPrefix"} ${m.path.value ?? "/"}` : "";
+  const pairs = list => (list || []).map(x => `${x.name}${x.type === "RegularExpression" ? "~" : "="}${x.value}`).join(",");
+  const h = pairs(m.headers), q = pairs(m.queryParams);
+  const method = m.method && typeof m.method === "object" ? `gRPC ${m.method.service || "*"}/${m.method.method || "*"}` : m.method;
+  return [method, p, h && `headers(${h})`, q && `query(${q})`].filter(Boolean).join(" ") || "any";
+};
+const hay = n => `${n.kind} ${n.ns} ${n.name} ${JSON.stringify((n.obj && n.obj.spec) || "")}`.toLowerCase();
+const conditions = n => {
+  const o = n.obj || {}, all = [...(get(o, "status.conditions") || []),
+    ...((get(o, "status.parents") || get(o, "status.ancestors") || []).flatMap(p => p.conditions || []))], seen = new Set();
+  return all.filter(c => !seen.has(c.type + c.status) && seen.add(c.type + c.status));
+};
+const failing = n => conditions(n).filter(c => c.status !== "True"), types = cs => esc(cs.map(c => c.type).join(", "));
+
+function yaml(v, ind) {
+  const pad = "  ".repeat(ind);
+  const scalar = x => typeof x === "string" ? (x === "" || /^[\s\d-]|[:#{}\[\],&*!|>'"%@`\n]|^(true|false|null|yes|no)$/i.test(x) ? JSON.stringify(x) : x) : String(x);
+  if (Array.isArray(v)) return v.length ? v.map(x => x !== null && typeof x === "object" && Object.keys(x).length
+    ? pad + "- " + yaml(x, ind + 1).replace(/^\s+/, "") : pad + "- " + esc(scalar(Array.isArray(x) ? "[]" : x && typeof x === "object" ? "{}" : x))).join("\n") : pad + "[]";
+  return Object.entries(v).map(([k, x]) => {
+    const key = `${pad}<span class="y">${esc(k)}</span>:`;
+    if (x !== null && typeof x === "object") return Object.keys(x).length ? `${key}\n${yaml(x, ind + (Array.isArray(x) ? 0 : 1))}` : `${key} ${Array.isArray(x) ? "[]" : "{}"}`;
+    return `${key} ${esc(scalar(x))}`;
+  }).join("\n");
+}
+
+/* ---------- cards, shared by the flow and the "outside the flow" tab ---------- */
+// Every object drawn in a flow is recorded here; the rest is listed in the other tab.
+const inFlow = new Set();
+const statusBadge = n => { const bad = failing(n);
+  return bad.length ? `<span class="badge bad" title="${esc(bad.map(c => `${c.type}: ${c.reason || ""} ${c.message || ""}`).join("\n"))}">✗ ${types(bad)}</span>` : ""; };
+const card = (n, body, extra = "") => { inFlow.add(n.id);
+  return `<div class="card" data-open="${esc(n.id)}" style="${rc(n)}"><div class="t"><span class="st">«${esc(n.kind)}»</span><b>${esc(n.name)}</b><span class="mut">${esc(n.ns)}</span>${extra}${n.external ? `<span class="badge">not captured</span>` : ""}${statusBadge(n)}</div>${body}</div>`; };
+const kv = pairs => { const p = pairs.filter(x => x[1] !== undefined && x[1] !== ""); return p.length ? `<div class="kv">${p.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>` : ""; };
+// a value laid out as YAML, collapsed when long
+const block = (v, label) => { const y = yaml(v, 0), lines = y.split("\n").length;
+  return lines > 18 ? `<details><summary>${esc(label || Object.keys(v).join(", "))} · ${lines} lines</summary><pre>${y}</pre></details>` : `<pre>${y}</pre>`; };
+// While a flow is drawn: setting name -> the policies in that flow that configure it.
+let sameSetting = null;
+const LEVEL = {G: "the gateway", R: "the route", B: "a backend"};
+// one configured setting: its category, its name and its value
+function feature(src, f) {
+  const v = get(src.obj, f.path);
+  // The same setting configured elsewhere on this request path. Which one applies is not worked out here.
+  // Only across levels: two backends of a route each having their own credentials is not an overlap.
+  const all = (sameSetting && sameSetting.get(f.key)) || [], own = all.find(x => x.p === src);
+  const others = own ? all.filter(x => x.level !== own.level) : [];
+  const also = others.length ? `<span class="badge also" title="The same setting is configured by more than one object on this request path. agwmap does not work out which one takes effect.">also set on ${esc(others.map(x => `${LEVEL[x.level]} by ${x.p.name}`).join(", "))}</span>` : "";
+  if (v === null || typeof v !== "object") return `<div class="feat"><div class="fh">${tag(f)}<b>${esc(f.key)}</b><span class="sv">${esc(v)}</span>${also}</div></div>`;
+  return `<div class="feat"><div class="fh">${tag(f)}<b>${esc(f.key)}</b>${also}</div>${block(v)}</div>`;
+}
+const feats = n => (n.features || []).map(f => feature(n, f)).join("");
+const specBlock = n => { const s = spec(n); return Object.keys(s).length ? `<div class="feat">${block(s, "spec")}</div>` : ""; };
+// what a backend-like object points at, and its inline policies
+const backendBody = b => { const ts = b.external ? [] : targetsOf(b); return (ts.length ? kv(ts.map(t => [t.name, `${t.proto} · ${t.where}`])) : "") + feats(b); };
+const bodyOf = n => n.role === "backend" ? backendBody(n) : (n.features || []).length ? feats(n) : specBlock(n);
+// A reference that leaves its namespace. Gateway API requires a ReferenceGrant for
+// route backends and listener certificates; for other references it is only noted.
+function crossBadge(e) {
+  if (!e || !e.crossNs) return "";
+  if (e.grant) { const g = N.get(e.grant); inFlow.add(g.id);
+    return `<span class="badge" data-open="${esc(g.id)}">cross-namespace · allowed by ReferenceGrant ${esc(g.name)}</span>`; }
+  return ["route", "gateway", "listenerset"].includes(N.get(e.from).role)
+    ? `<span class="badge bad" title="The reference leaves its namespace and no ReferenceGrant in the target namespace allows it">cross-namespace · no ReferenceGrant</span>`
+    : `<span class="badge">cross-namespace</span>`;
+}
+const continues = o => { const g = gatewayBehind(o);
+  return g ? `<span class="badge go" data-open="${esc(g.id)}" title="This Service has the name of a Gateway: it is that gateway's proxy, so the request goes on through it">continues at gateway ${esc(g.name)}</span>` : ""; };
+const polCards = (list, none) => list.length ? list.map(({p, section}) => { const ph = get(p.obj, "spec.traffic.phase");
+  return card(p, feats(p), (section ? `<span class="badge">#${esc(section)}</span>` : "") + (ph ? `<span class="badge go" title="spec.traffic.phase: when the traffic settings of this policy run">phase ${esc(ph)}</span>` : "")) + uses(p); }).join("") : none ? `<div class="empty">${none}</div>` : "";
+// The objects a card refers to. Captured ones become nested cards (an AuthConfig, a
+// budget, a WAF policy, a model), the rest (Secrets, Services) a line of chips.
+const USES = new Set(["ref", "params", "class", "discovers", "backend"]);
+function uses(n, seen = new Set([n.id])) {
+  let chips = "", cards = "";
+  for (const e of outE(n.id)) {
+    if (!USES.has(e.type) || (n.role === "route" && e.type === "backend" && /backendRefs/.test(e.path || ""))) continue;
+    const o = N.get(e.to);
+    if (seen.has(o.id)) continue;
+    seen.add(o.id);
+    const where = (e.path || "").replace(/^spec\.|\.\d+(?=\.|$)/g, "").split(".").slice(-2).join(".");
+    const pols = o.external ? polsOn(o.id) : [];
+    if (o.external && !pols.length) { inFlow.add(o.id);
+      chips += `<span class="chip" data-open="${esc(o.id)}" title="${esc(e.path || "")}"><span class="k">${esc(o.kind)}</span> ${esc(o.ns !== n.ns && o.ns ? o.ns + "/" : "")}${esc(o.name)}${crossBadge(e)}${continues(o)}</span>`; }
+    // A Service that policies are attached to (a timeout on an ext-auth Service): show them with it.
+    else if (o.external) cards += card(o, "", `<span class="badge">${esc(where)}</span>${crossBadge(e)}${continues(o)}`) + `<div class="sub">${polCards(pols)}</div>`;
+    // Infrastructure settings (class, parameters) are a title only: click for the details.
+    else if (o.role === "class" || o.role === "params") cards += card(o, "", `<span class="badge">${esc(where)}</span>`) + uses(o, seen);
+    else cards += card(o, bodyOf(o) + uses(o, seen), `<span class="badge" title="${esc(e.path || "")}">${esc(e.type === "discovers" ? "discovered budget" : where)}</span>${e.note ? `<span class="badge" title="${esc(e.note)}">selector not evaluated</span>` : ""}${crossBadge(e)}`);
+  }
+  return (chips ? `<div class="uses"><span class="ct">refers to</span>${chips}</div>` : "") + (cards ? `<div class="sub">${cards}</div>` : "");
+}
+// Captured objects that point at this one without attaching to it as a policy (an InferenceObjective for a pool).
+const usedBy = n => { const list = inE(n.id).filter(e => e.type === "ref" && N.get(e.from).role === "other").map(e => N.get(e.from));
+  return list.length ? `<div class="sub">${list.map(o => card(o, specBlock(o), `<span class="badge">refers to ${esc(n.name)}</span>`)).join("")}</div>` : ""; };
+const stage = (n, color, title, body) => `<div class="stage" style="--sc:var(--${color})"><span class="dot">${n}</span><h4>${title}</h4>${body}</div>`;
+
+/* ---------- request flow ---------- */
+// One entry per route and place it is attached to (a gateway listener, or a
+// Service in the mesh), plus listeners without routes and unattached routes.
+const entries = [];
+for (const g of gateways) {
+  const grp = {id: g.id, label: g.ns + "/" + g.name}; // one sidebar group per gateway, shared by its listeners
+  for (const le of listenersOf(g)) {
+    const rs = routesOf(g, le);
+    if (rs.length) for (const r of rs) entries.push({grp, gw: g, le, r}); else entries.push({grp, gw: g, le, r: null});
+  }
+}
+const MESH = {id: "mesh", label: "Mesh · attached to a Service"}, NONE = {id: "none", label: "Not attached to a listener"};
+const placed = new Set(entries.filter(e => e.r).map(e => e.r.id));
+for (const r of routes) {
+  if (placed.has(r.id) || (isChildRoute(r) && parentsOf(r).length)) continue; // on a listener, or drawn inside its parent route
+  const svcs = serviceParents(r);
+  if (svcs.length) for (const svc of svcs) entries.push({grp: MESH, svc, r});
+  else if (!isChildRoute(r)) entries.push({grp: NONE, r});
+}
+entries.forEach(e => e.key = [e.r ? e.r.id : "", e.gw ? e.gw.id : e.svc ? e.svc.id : "", e.le ? (e.le.via ? e.le.via.id : "") + "#" + e.le.l.name : ""].join("|"));
+
+// the rules of a route: matches, filters, backends and what is attached to them
+function rulesHtml(r, depth = 0) {
+  const s = spec(r), rb = ruleBackends(r);
+  let br = "";
+  (s.rules || [{}]).forEach((ru, ri) => {
+    const list = rb.get(ri) || [];
+    br += `<div class="branch"><h5>Rule ${ri + 1}${ru.name ? " · " + esc(ru.name) : ""} <span class="mut mono">${esc((ru.matches || [{}]).map(matchText).join(" | "))}</span></h5>`;
+    for (const f of ru.filters || []) { const {type, ...rest} = f, v = Object.values(rest)[0];
+      br += `<div class="feat filter"><div class="fh"><span class="tag" style="--c:var(--transform)">Filter</span><b>${esc(type)}</b></div>${v && typeof v === "object" ? block(v) : ""}</div>`; }
+    for (const {b, weight, e: edge} of list) {
+      const extra = (weight !== undefined && list.length > 1 ? `<span class="badge">weight ${esc(weight)}</span>` : "") + crossBadge(edge) + continues(b);
+      if (b.role === "route") { // delegation: the request goes on through the rules of another route
+        br += card(b, kv([["hostnames", (spec(b).hostnames || []).join(", ")]]), `<span class="badge go">delegated route</span>${extra}`);
+        br += `<div class="sub">${polCards(polsOn(b.id))}${depth < 4 ? rulesHtml(b, depth + 1) : ""}</div>`;
+        continue;
+      }
+      br += card(b, backendBody(b), extra) + uses(b) + usedBy(b);
+      const ps = polsOn(b.id);
+      if (ps.length) br += `<div class="sub">${polCards(ps)}</div>`;
+    }
+    if (!list.length) br += `<div class="empty" style="margin:8px 0">No backend: the filters answer the request.</div>`;
+    br += `</div>`;
+  });
+  return br;
+}
+// every policy on the path of a flow, by the setting it configures
+function settingsOnPath(e, gwPols) {
+  const m = new Map(), pols = id => polsOn(id).map(x => x.p);
+  const add = (nodes, level) => { for (const p of nodes) for (const f of p.features || [])
+    if (!(m.get(f.key) || []).some(x => x.p === p)) push(m, f.key, {p, level}); };
+  add(gwPols.map(x => x.p), "G");
+  const walk = (r, depth) => { add(pols(r.id), "R");
+    for (const list of ruleBackends(r).values()) for (const {b} of list) {
+      if (b.role === "route") { if (depth < 4) walk(b, depth + 1); }
+      else add([...pols(b.id), b], "B"); // a backend's policies, then its own inline settings
+    } };
+  if (e.r) walk(e.r, 0);
+  return m;
+}
+function flowHtml(e) {
+  const r = e.r, {l, via} = e.le || {}, cls = e.gw && outE(e.gw.id).find(x => x.type === "class");
+  const gwPols = e.gw ? [...polsOn(e.gw.id).filter(x => !x.section || (!via && x.section === l.name)),
+      ...(via ? polsOn(via.id).filter(x => !x.section || x.section === l.name) : []), ...(cls ? polsOn(cls.to) : [])]
+    : e.svc ? polsOn(e.svc.id) : [];
+  sameSetting = settingsOnPath(e, gwPols);
+  let h = "", i = 1;
+  if (e.gw) {
+    const lkv = kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
+      ["tls", l.tls ? `${l.tls.mode || "Terminate"} · ${(l.tls.certificateRefs || []).map(c => c.name).join(", ")}` : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
+    h += stage(i++, "gateway", "Client connects to the listener",
+      card(e.gw, via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + uses(e.gw) +
+      (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>`) + uses(via)}</div>` : ""));
+    h += stage(i++, "policy", "Policies attached to the gateway", polCards(gwPols, "None at gateway level."));
+  } else if (e.svc) {
+    h += stage(i++, "gateway", "Traffic in the mesh addressed to the Service",
+      card(e.svc, `<div class="kv"><span>note</span><span>The route applies to requests for this Service. Which waypoint or proxy handles them is set by labels on the Service or its namespace, which are not captured.</span></div>`, continues(e.svc)));
+    h += stage(i++, "policy", "Policies attached to the Service", polCards(gwPols, "None on the Service."));
+  }
+  h += stage(i++, "route", "Route matches the request", r ? card(r, kv([["hostnames", (spec(r).hostnames || []).join(", ")], ["rules", (spec(r).rules || []).length]]))
+    : `<div class="empty">No route is attached to this listener.</div>`);
+  if (r) {
+    h += stage(i++, "policy", "Policies attached to the route", polCards(polsOn(r.id), "None at route level."));
+    h += stage(i++, "backend", "Backends, their policies and upstream targets", rulesHtml(r));
+  }
+  sameSetting = null;
+  return h;
+}
+// Draw every flow once, so that inFlow knows which objects no flow reaches.
+entries.forEach(flowHtml);
+const outside = D.nodes.filter(n => !n.external && !inFlow.has(n.id));
+
+let sel = null;
+const collapsed = new Set(); // groups folded away in the sidebar
+function viewFlow(root) {
+  if (!sel || !entries.some(e => e.key === sel)) sel = (entries.find(e => e.r) || entries[0] || {}).key || null;
+  root.innerHTML = `<div class="flowwrap"><nav class="tree"></nav><div class="flow"></div></div>`;
+  const tree = root.querySelector(".tree"), flow = root.querySelector(".flow");
+  const paint = q => {
+    let h = "", lastG = null, lastL = null;
+    for (const e of entries) {
+      if (q && !(e.r ? hay(e.r) : hay(e.gw)).includes(q)) continue;
+      const shut = collapsed.has(e.grp.id);
+      if (e.grp !== lastG) {
+        const n = entries.filter(x => x.grp === e.grp && x.r).length;
+        h += `<div class="g" data-g="${esc(e.grp.id)}" title="${shut ? "Expand" : "Collapse"}"><span class="caret">${shut ? "▸" : "▾"}</span>${esc(e.grp.label)}<span class="n">${n}</span></div>`;
+        lastG = e.grp; lastL = null;
+      }
+      if (shut) continue;
+      const lkey = e.le || e.svc;
+      if (lkey && lkey !== lastL) {
+        h += e.le ? `<div class="l">${esc(e.le.l.name)} · ${esc(e.le.l.protocol)} :${esc(e.le.l.port)}${e.le.via ? ` · via ${esc(e.le.via.name)}` : ""}</div>`
+          : `<div class="l">Service ${esc(e.svc.ns)}/${esc(e.svc.name)}</div>`;
+        lastL = lkey;
+      }
+      h += `<div class="r ${e.key === sel ? "on" : ""}" data-k="${esc(e.key)}">${e.r ? `${esc(e.r.name)}<small>${esc(e.r.kind === "HTTPRoute" ? "" : e.r.kind + " · ")}${esc((spec(e.r).hostnames || []).join(", ") || e.r.ns)}</small>` : `<span class="empty">no routes attached</span>`}</div>`;
+    }
+    tree.innerHTML = h || `<div class="empty">No routes match</div>`;
+  };
+  const show = () => { const e = entries.find(x => x.key === sel); flow.innerHTML = e ? flowHtml(e) : `<div class="empty">No gateways or routes in this capture.</div>`; };
+  tree.addEventListener("click", ev => {
+    const g = ev.target.closest(".g"), el = ev.target.closest(".r");
+    if (g) { const id = g.dataset.g; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); paint(curQ()); }
+    else if (el) { sel = el.dataset.k; paint(curQ()); show(); }
+  });
+  show();
+  return paint;
+}
+
+/* ---------- outside the flow ---------- */
+// Captured objects that no request flow reaches: nothing is left out of the page.
+function viewOutside(root) {
+  const why = n => n.role === "policy" ? (outE(n.id).some(e => e.type === "target" && !N.get(e.to).external) ? "attached to an object that no route uses" : "its target was not found")
+    : n.role === "backend" ? "no route sends traffic to it"
+    : n.role === "params" ? "no gateway or class uses it"
+    : n.role === "class" ? "no gateway uses it"
+    : /RBAC|RoleBinding/.test(n.kind) ? "access to the management UI, not to traffic"
+    : !inE(n.id).length ? "nothing refers to it" : "used only by objects outside the flow";
+  root.innerHTML = `<p class="mut">Objects that no request flow reaches: unused or dangling configuration, and settings that are not about traffic. Everything captured is either in a flow or listed here.</p><div class="flow" id="outside"></div>`;
+  const box = root.querySelector("#outside");
+  const paint = q => {
+    const groups = new Map();
+    for (const n of outside) if (!q || hay(n).includes(q)) push(groups, n.kind, n);
+    box.innerHTML = [...groups].map(([kind, list]) => `<div class="branch"><h5>${esc(kind)} <span class="mut">${list.length}</span></h5>${
+      list.map(n => card(n, bodyOf(n), `<span class="badge">${esc(why(n))}</span>`) + uses(n)).join("")}</div>`).join("") || `<div class="empty">Nothing: every captured object is part of a flow.</div>`;
+  };
+  return paint;
+}
+
+/* ---------- resources ---------- */
+function viewResources(root) {
+  const order = ["gateway", "listenerset", "class", "route", "backend", "policy", "params", "other", "external"];
+  const kinds = new Map();
+  for (const n of [...D.nodes].sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id))) {
+    const k = (n.external ? "ext:" : "") + n.group + "/" + n.kind;
+    push(kinds, k, n);
+  }
+  root.innerHTML = `<p class="mut">Every object this page is built from. <b>Export snapshot</b> downloads them as one file; <span class="mono">agwmap -from FILE</span> renders that file again.</p>
+    <div class="tw"><table><thead><tr><th>Name</th><th>Namespace</th><th>Configures</th><th>Status</th><th>Refers to</th><th>Referred by</th></tr></thead><tbody></tbody></table></div>`;
+  const body = root.querySelector("tbody");
+  const status = n => {
+    if (n.external) return `<span class="mut">not captured</span>`;
+    const cs = conditions(n), bad = failing(n);
+    return !cs.length ? "" : bad.length ? `<span class="no">✗ ${types(bad)}</span>` : `<span class="ok">✓ ${types(cs)}</span>`;
+  };
+  const paint = q => {
+    let h = "";
+    for (const list of kinds.values()) {
+      const rows = list.filter(n => !q || hay(n).includes(q)), f = list[0];
+      if (!rows.length) continue;
+      h += `<tr class="grp"><td colspan="6">${esc(f.kind)}<span class="mono">${esc(f.group || "core")}${f.version ? "/" + esc(f.version) : ""}</span><span>${rows.length}${f.external ? " · only referred to, not captured" : ""}</span></td></tr>`;
+      h += rows.map(n => `<tr data-open="${esc(n.id)}"><td><b>${esc(n.name)}</b></td><td class="mut">${esc(n.ns || "—")}</td>
+        <td>${[...new Set((n.features || []).map(x => x.cat))].map(c => tag({cat: c})).join(" ")}</td><td>${status(n)}</td>
+        <td class="num">${outE(n.id).length || ""}</td><td class="num">${inE(n.id).length || ""}</td></tr>`).join("");
+    }
+    body.innerHTML = h || `<tr><td colspan="6" class="empty">Nothing matches</td></tr>`;
+  };
+  return paint;
+}
+
+/* ---------- raw ---------- */
+// every captured object as one multi-document YAML text
+function viewRaw(root) {
+  const objs = D.nodes.filter(n => n.obj), tmp = document.createElement("div");
+  const text = n => { tmp.innerHTML = yaml(n.obj, 0); return tmp.textContent; }; // yaml() returns HTML; this is its plain text
+  root.innerHTML = `<div class="rawbar"><span class="mut" id="rawcount"></span><button class="btn" id="rawcopy">Copy</button></div><pre id="rawtext"></pre>`;
+  const pre = root.querySelector("#rawtext"), count = root.querySelector("#rawcount");
+  const paint = q => {
+    const list = objs.filter(n => !q || hay(n).includes(q));
+    pre.textContent = list.map(n => `---\n${text(n)}\n`).join("");
+    count.textContent = `${list.length} of ${objs.length} objects${D.meta.anonymized ? ", anonymized" : ", real values"}`;
+  };
+  root.querySelector("#rawcopy").addEventListener("click", () => navigator.clipboard.writeText(pre.textContent));
+  return paint;
+}
+
+/* ---------- detail drawer ---------- */
+const drawer = $("drawer");
+function openDetail(id) {
+  const n = N.get(id);
+  if (!n) return;
+  const rel = (e, other, dir) => { const o = N.get(other); return `<div class="rel" data-open="${esc(o.id)}"><span class="ty">${dir} ${esc(e.type)}</span>
+    <span><span class="k">${esc(o.kind)}</span> ${esc(o.ns ? o.ns + "/" : "")}${esc(o.name)}${e.section ? ` <span class="k">#${esc(e.section)}</span>` : ""}${o.external ? ` <span class="badge">not captured</span>` : ""}</span></div>`; };
+  const condHtml = conditions(n).map(c => `<div class="cond"><span class="${c.status === "True" ? "ok" : "no"}">${c.status === "True" ? "✓" : "✗"}</span> ${esc(c.type)} <span class="mut">${esc(c.reason || "")}${c.status !== "True" && c.message ? " · " + esc(c.message) : ""}</span></div>`).join("");
+  drawer.style.cssText = rc(n);
+  drawer.innerHTML = `<div class="dh"><button class="x" title="Close">×</button><span class="st">${esc(n.group ? n.group + "/" : "")}${esc(n.version || "")} ${esc(n.kind)}</span>
+      <h2>${esc(n.name)}</h2><span class="mut">${esc(n.ns || "cluster-scoped")}</span></div>
+    <div class="db">
+      ${n.external ? `<p class="mut">This object is only referred to. agwmap does not capture ${esc(n.kind)} objects, so it may or may not exist.</p>` : ""}
+      ${(n.features || []).length ? `<h3>Configures</h3><div class="feats">${n.features.map(f => `<span>${tag(f)} <span class="mono">${esc(f.key)}</span></span>`).join("")}</div>` : ""}
+      ${outE(id).length ? `<h3>Refers to</h3>${outE(id).map(e => rel(e, e.to, "→")).join("")}` : ""}
+      ${inE(id).length ? `<h3>Referred to by</h3>${inE(id).map(e => rel(e, e.from, "←")).join("")}` : ""}
+      ${condHtml ? `<h3>Status</h3>${condHtml}` : ""}
+      ${n.obj ? `<h3>YAML <button class="copy">copy</button></h3><pre>${yaml(n.obj, 0)}</pre>` : ""}
+    </div>`;
+  drawer.classList.add("on");
+}
+drawer.addEventListener("click", e => {
+  if (e.target.closest(".x")) drawer.classList.remove("on");
+  if (e.target.closest(".copy")) navigator.clipboard.writeText(drawer.querySelector("pre").textContent);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") drawer.classList.remove("on"); });
+document.addEventListener("click", e => {
+  if (e.target.closest("summary") || String(getSelection())) return; // expanding or selecting text is not a click on the card
+  const el = e.target.closest("[data-open]");
+  if (el) openDetail(el.dataset.open);
+  else if (!e.target.closest("#drawer")) drawer.classList.remove("on");
+});
+
+/* ---------- shell ---------- */
+let applyFilter = () => {};
+const qEl = $("q"), curQ = () => qEl.value.trim().toLowerCase();
+const VIEWS = {flow: viewFlow, resources: viewResources, outside: viewOutside, raw: viewRaw};
+document.querySelector('#tabs [data-v="outside"]').textContent += ` (${outside.length})`;
+function render() {
+  const v = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : "flow";
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  applyFilter = VIEWS[v]($("view")); // each view returns the function that repaints it for a filter text
+  applyFilter(curQ());
+}
+$("tabs").addEventListener("click", e => { if (e.target.dataset.v) location.hash = e.target.dataset.v; });
+window.addEventListener("hashchange", render);
+qEl.addEventListener("input", () => applyFilter(curQ()));
+$("export").addEventListener("click", () => {
+  const snap = {kind: "agwmap-snapshot", meta: D.meta, objects: D.nodes.filter(n => n.obj).map(n => n.obj)};
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 1)], {type: "application/json"}));
+  a.download = `agwmap-snapshot-${D.meta.generatedAt.replace(/[:]/g, "").slice(0, 15)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+$("meta").textContent = `${D.meta.context}${D.meta.namespace ? " · ns " + D.meta.namespace : ""} · ${D.nodes.filter(n => !n.external).length} objects · captured ${new Date(D.meta.generatedAt).toLocaleString()}`;
+const st = $("state");
+st.textContent = D.meta.anonymized ? "anonymized" : "real values";
+st.classList.toggle("raw", !D.meta.anonymized);
+st.title = D.meta.anonymized
+  ? "Hostnames, URLs, IP addresses, account and client ids and inline credentials were replaced with pseudonyms when this was captured. Of the metadata only name, namespace and gateway labels and annotations are kept. The Raw tab shows exactly what the capture holds."
+  : "Captured with -anonymize=false: this page and its export hold the real hostnames and values.";
+$("warn").innerHTML = (D.meta.warnings || []).length ? `<div class="warn"><b>Incomplete capture:</b><br>${D.meta.warnings.map(esc).join("<br>")}</div>` : "";
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# Built binaries
+/agwmap
+/kubectl-agwmap
+dist/
+
+# What agwmap writes: pages and snapshots can hold real cluster data
+out/
+/*.html
+/*.json
+
+.DS_Store

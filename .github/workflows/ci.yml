@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Format
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Vet
+        run: go vet ./...
+
+      # Runs the built binary against a fake API server that serves testdata/.
+      - name: Test
+        run: go test ./...
+
+      - name: Build the release archives
+        run: scripts/release.sh v0.0.0
+
+  # The same binary against a real API server: a kind cluster with the Gateway
+  # API and agentgateway CRDs and examples/demo.yaml.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: End to end on kind
+        run: scripts/e2e.sh

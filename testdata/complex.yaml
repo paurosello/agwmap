@@ -1,0 +1,745 @@
+# A deliberately busy setup that uses every kind agwmap knows about: three
+# gateways on their own GatewayClass, a listener set, LLM, MCP, A2A, HTTP and
+# gRPC routes, and policies at every level. Everything lives in gwdemo-*
+# namespaces. Several references are dangling on purpose (Secrets, Services),
+# and one cross-namespace reference has no ReferenceGrant.
+apiVersion: v1
+kind: Namespace
+metadata: {name: gwdemo-infra, labels: {gwdemo: "true", agentgateway.solo.io/budget-discovery: enabled}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: gwdemo-ai, labels: {gwdemo: "true", agentgateway.solo.io/budget-discovery: enabled}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: gwdemo-mcp, labels: {gwdemo: "true"}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: gwdemo-apps, labels: {gwdemo: "true"}}
+---
+# ---------- infrastructure: class, parameters, gateways ----------
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata: {name: gwdemo}
+spec:
+  controllerName: solo.io/enterprise-agentgateway
+  description: Class for the agwmap demo gateways
+  parametersRef:
+    group: enterpriseagentgateway.solo.io
+    kind: EnterpriseAgentgatewayParameters
+    name: gwdemo-defaults
+    namespace: gwdemo-infra
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: gwdemo-defaults, namespace: gwdemo-infra}
+spec:
+  logging: {level: info, format: json}
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: ai-gateway, namespace: gwdemo-infra}
+spec:
+  logging: {level: debug}
+  env:
+  - {name: DEMO_REGION, value: eu-west-1}
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+---
+# The open-source parameters kind, not referenced by any gateway here.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata: {name: oss-defaults, namespace: gwdemo-infra}
+spec:
+  logging: {level: warn}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: edge, namespace: gwdemo-infra, labels: {tier: public}}
+spec:
+  gatewayClassName: gwdemo
+  listeners:
+  - name: https
+    port: 443
+    protocol: HTTPS
+    hostname: "*.apps.acme.test"
+    tls:
+      mode: Terminate
+      certificateRefs: [{name: edge-tls}]
+    allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {gwdemo: "true"}}}}
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes: {namespaces: {from: All}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: ai, namespace: gwdemo-infra, labels: {tier: ai}}
+spec:
+  gatewayClassName: gwdemo
+  infrastructure:
+    parametersRef:
+      group: enterpriseagentgateway.solo.io
+      kind: EnterpriseAgentgatewayParameters
+      name: ai-gateway
+  listeners:
+  - name: https
+    port: 443
+    protocol: HTTPS
+    hostname: ai.acme.test
+    tls:
+      mode: Terminate
+      certificateRefs: [{name: ai-tls}]
+    allowedRoutes: {namespaces: {from: All}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: internal, namespace: gwdemo-infra, labels: {tier: internal}}
+spec:
+  gatewayClassName: gwdemo
+  listeners:
+  - name: grpc
+    port: 9090
+    protocol: HTTP
+    allowedRoutes: {namespaces: {from: All}}
+  - name: admin
+    port: 8080
+    protocol: HTTP
+    allowedRoutes: {namespaces: {from: Same}}
+---
+# Extra listeners that the AI team adds to the ai gateway from its own namespace.
+apiVersion: enterprise.solo.io/v1alpha1
+kind: EnterpriseListenerSet
+metadata: {name: partners, namespace: gwdemo-ai}
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: ai
+    namespace: gwdemo-infra
+  listeners:
+  - name: partner-https
+    port: 8443
+    protocol: HTTPS
+    hostname: partners.acme.test
+    tls:
+      mode: Terminate
+      certificateRefs: [{name: partners-tls}]
+    allowedRoutes: {namespaces: {from: Same}}
+---
+# ---------- gateway-level policies ----------
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: edge-observability, namespace: gwdemo-infra}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: edge}
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: internal}
+  frontend:
+    tracing:
+      backendRef: {name: otel-collector, port: 4317}
+      protocol: GRPC
+    accessLog:
+      attributes:
+        add:
+        - {name: team, expression: 'request.headers["x-team"]'}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: edge-https-hardening, namespace: gwdemo-infra}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: edge, sectionName: https}
+  traffic:
+    cors:
+      allowOrigins: ["https://portal.apps.acme.test"]
+      allowMethods: [GET, POST]
+      allowHeaders: [authorization, content-type]
+      maxAge: 600
+    csrf:
+      additionalOrigins: ["https://portal.apps.acme.test"]
+    timeouts: {request: 30s}
+    retry: {attempts: 2, backoff: 250ms, codes: [502, 503]}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: ai-keys-and-budgets, namespace: gwdemo-infra}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: ai}
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      secretSelector:
+        matchLabels: {agentgateway.solo.io/virtual-key-set: gwdemo}
+    entBudgetEnforcement:
+      discovery:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels: {agentgateway.solo.io/budget-discovery: enabled}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: partners-waf, namespace: gwdemo-ai}
+spec:
+  targetRefs:
+  - {group: enterprise.solo.io, kind: EnterpriseListenerSet, name: partners}
+  traffic:
+    entWAF:
+      wafPolicyRef: {name: owasp-baseline}
+---
+apiVersion: waf.solo.io/v1alpha1
+kind: WAFPolicy
+metadata: {name: owasp-baseline, namespace: gwdemo-ai}
+spec:
+  ruleEngineSettings:
+    inline: SecRuleEngine On
+  processingConfig:
+    request: {mode: HeadersAndBody}
+    response: {mode: None}
+  customDirectives:
+  - inline: 'SecRule REQUEST_HEADERS:User-Agent "@contains sqlmap" "id:100001,phase:1,deny,status:403"'
+  customInterventionResponse:
+    statusCode: 403
+    body: Blocked by the gateway
+---
+# ---------- LLM traffic ----------
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: openai, namespace: gwdemo-ai, labels: {team: ai}}
+spec:
+  ai:
+    provider:
+      openai: {model: gpt-4o}
+  policies:
+    auth:
+      secretRef: {name: openai-api-key}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: anthropic, namespace: gwdemo-ai, labels: {team: ai}}
+spec:
+  ai:
+    provider:
+      anthropic: {model: claude-sonnet-4-5}
+  policies:
+    auth:
+      secretRef: {name: anthropic-api-key}
+---
+# Priority groups: Bedrock first, then OpenAI or Vertex AI.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: llm-failover, namespace: gwdemo-ai, labels: {team: ai}}
+spec:
+  ai:
+    groups:
+    - providers:
+      - name: bedrock-primary
+        bedrock: {model: anthropic.claude-3-5-sonnet-20241022-v2:0, region: eu-west-1}
+    - providers:
+      - name: openai-fallback
+        openai: {model: gpt-4o-mini}
+        policies:
+          auth:
+            secretRef: {name: openai-api-key}
+      - name: vertex-fallback
+        vertexai: {model: gemini-2.5-flash, projectId: acme-ml-prod-4711, region: europe-west4}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata: {name: gpt-4o, namespace: gwdemo-ai}
+spec:
+  provider: OpenAI
+  match: {model: gpt-4o}
+  parentRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: model-catalog}
+  policies:
+    auth:
+      secretRef: {name: openai-api-key}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata: {name: local-qwen, namespace: gwdemo-ai}
+spec:
+  provider: OpenAI
+  baseURL: http://vllm.gwdemo-ai.svc.cluster.local:8000/v1
+  match: {model: qwen-local}
+  parentRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: model-catalog}
+---
+# A virtual model that tries gpt-4o first and falls back to the local one.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata: {name: smart, namespace: gwdemo-ai}
+spec:
+  match: {model: smart}
+  parentRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: model-catalog}
+  virtualModel:
+    failover:
+      targets:
+      - {priority: 1, modelRef: {name: gpt-4o}}
+      - {priority: 2, modelRef: {name: local-qwen}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: chat, namespace: gwdemo-ai, labels: {team: ai}}
+spec:
+  parentRefs:
+  - {name: ai, namespace: gwdemo-infra, sectionName: https}
+  hostnames: [ai.acme.test]
+  rules:
+  - name: openai
+    matches: [{path: {type: PathPrefix, value: /openai}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: openai}
+  - name: split
+    matches: [{path: {type: PathPrefix, value: /v1/chat}, headers: [{name: x-experiment, value: canary}]}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: openai, weight: 80}
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: anthropic, weight: 20}
+  - name: default
+    matches: [{path: {type: PathPrefix, value: /v1}}]
+    backendRefs:
+    - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: llm-failover}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: model-catalog, namespace: gwdemo-ai, labels: {team: ai}}
+spec:
+  parentRefs:
+  - {name: ai, namespace: gwdemo-infra, sectionName: https}
+  hostnames: [ai.acme.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /models}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayModel, name: "*"}
+---
+# Attached to the listener set, not to the gateway directly.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: partner-chat, namespace: gwdemo-ai}
+spec:
+  parentRefs:
+  - {group: enterprise.solo.io, kind: EnterpriseListenerSet, name: partners, sectionName: partner-https}
+  hostnames: [partners.acme.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /v1}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: anthropic}
+---
+# Selects every route labelled team=ai instead of naming them.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: ai-team-limits, namespace: gwdemo-ai}
+spec:
+  targetSelectors:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    matchLabels: {team: ai}
+  traffic:
+    entRateLimit:
+      global:
+        rateLimitConfigRefs:
+        - {name: per-team-tokens}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: partner-token-limit, namespace: gwdemo-ai}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: partner-chat}
+  traffic:
+    rateLimit:
+      local:
+      - {tokens: 50000, unit: Minutes}
+---
+apiVersion: ratelimit.solo.io/v1alpha1
+kind: RateLimitConfig
+metadata: {name: per-team-tokens, namespace: gwdemo-ai}
+spec:
+  raw:
+    descriptors:
+    - key: team
+      rateLimit: {requestsPerUnit: 200000, unit: HOUR}
+    rateLimits:
+    - actions:
+      - requestHeaders: {descriptorKey: team, headerName: x-team}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: chat-guardrails, namespace: gwdemo-ai}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: chat}
+  backend:
+    ai:
+      prompt:
+        prepend:
+        - {role: system, content: Never reveal internal project names.}
+      promptGuard:
+        request:
+        - regex:
+            action: Reject
+            builtins: [CreditCard, Ssn]
+          response:
+            message: Request blocked, it contains personal data.
+        - webhook:
+            backendRef: {name: guardrail-webhook, port: 8000}
+        response:
+        - regex:
+            action: Mask
+            builtins: [Email, PhoneNumber]
+---
+# Applies to one rule of the route only.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: chat-split-transform, namespace: gwdemo-ai}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: chat, sectionName: split}
+  traffic:
+    transformation:
+      request:
+        set:
+        - {name: x-experiment-arm, value: '"canary"'}
+    headerModifiers:
+      response:
+        add:
+        - {name: x-served-by, value: ai-gateway}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: openai-upstream, namespace: gwdemo-ai}
+spec:
+  targetRefs:
+  - {group: agentgateway.dev, kind: AgentgatewayBackend, name: openai}
+  backend:
+    tls:
+      sni: api.openai.com
+    http:
+      requestTimeout: 120s
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBudget
+metadata: {name: team-budgets, namespace: gwdemo-ai}
+spec:
+  budgets:
+  - name: per-key-daily-tokens
+    subject: {virtualKey: "*"}
+    limit: {unit: Tokens, amount: 250000}
+    window: {unit: Day}
+    onBudgetExceeded: Block
+  - name: monthly-usd
+    limit: {unit: USD, amount: 2000}
+    window: {unit: Month}
+    onBudgetExceeded: Audit
+    notifications:
+    - thresholdPercent: 80
+      channels:
+      - type: Slack
+        url: https://hooks.slack.com/services/T0000/B0000/XXXXXXXX
+---
+# ---------- MCP traffic ----------
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: tools, namespace: gwdemo-mcp}
+spec:
+  mcp:
+    failureMode: FailOpen
+    targets:
+    - name: weather
+      static: {host: mcp.weather.acme-partners.test, port: 443, path: /mcp, protocol: StreamableHTTP}
+    - name: inventory
+      static:
+        backendRef: {name: inventory-mcp}
+        port: 3001
+        protocol: SSE
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: connectors, namespace: gwdemo-mcp}
+spec:
+  entMcp:
+    toolMode: Search
+    targets:
+    - name: github
+      static: {host: api.githubcopilot.com, port: 443, path: /mcp, protocol: StreamableHTTP}
+    - name: jira
+      static: {host: mcp.atlassian.com, port: 443, path: /v1/sse, protocol: SSE}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: mcp, namespace: gwdemo-mcp}
+spec:
+  parentRefs:
+  - {name: edge, namespace: gwdemo-infra, sectionName: https}
+  hostnames: [mcp.apps.acme.test]
+  rules:
+  - name: tools
+    matches: [{path: {type: PathPrefix, value: /tools}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: tools}
+  - name: connectors
+    matches: [{path: {type: PathPrefix, value: /connectors}}]
+    backendRefs:
+    - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: connectors}
+  - name: health
+    matches: [{path: {type: Exact, value: /healthz}}]
+    backendRefs:
+    # In another namespace, allowed by the ReferenceGrant below.
+    - {name: status, namespace: gwdemo-apps, port: 8080}
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: {name: mcp-routes-to-status, namespace: gwdemo-apps}
+spec:
+  from:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: gwdemo-mcp}
+  to:
+  - {group: "", kind: Service, name: status}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: mcp-access, namespace: gwdemo-mcp}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: mcp}
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+      - issuer: https://login.acme.test/realms/corp
+        audiences: [mcp-gateway]
+        jwks:
+          remote:
+            url: https://login.acme.test/realms/corp/protocol/openid-connect/certs
+    authorization:
+      action: Allow
+      policy:
+        matchExpressions: ['"engineering" in jwt.groups']
+    entExtAuth:
+      authConfigRef: {name: device-posture}
+---
+apiVersion: extauth.solo.io/v1
+kind: AuthConfig
+metadata: {name: device-posture, namespace: gwdemo-mcp}
+spec:
+  configs:
+  - passThroughAuth:
+      grpc:
+        address: posture.gwdemo-mcp.svc.cluster.local:9001
+---
+# Tool-level authorization on the backend, and credentials for one target.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: tools-authz, namespace: gwdemo-mcp}
+spec:
+  targetRefs:
+  - {group: agentgateway.dev, kind: AgentgatewayBackend, name: tools}
+  backend:
+    mcp:
+      authorization:
+        action: Allow
+        policy:
+          matchExpressions: ['mcp.tool.name != "delete_item" || "admins" in jwt.groups']
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: github-credentials, namespace: gwdemo-mcp}
+spec:
+  targetRefs:
+  - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: connectors, sectionName: github}
+  backend:
+    auth:
+      secretRef: {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayExternalSecret, name: github-token}
+---
+# The token above comes from an external secret store.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayExternalSecret
+metadata: {name: github-token, namespace: gwdemo-mcp}
+spec:
+  storeRef: {name: corp-vault}
+  refreshInterval: 1h
+  data:
+  - materializedKey: Authorization
+    remoteRef: {key: teams/platform/github, property: token}
+---
+# ---------- plain HTTP, gRPC and A2A traffic ----------
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: shop, namespace: gwdemo-apps}
+spec:
+  parentRefs:
+  - {name: edge, namespace: gwdemo-infra, sectionName: https}
+  hostnames: [shop.apps.acme.test]
+  rules:
+  - name: api
+    matches: [{path: {type: PathPrefix, value: /api}, method: GET}, {path: {type: PathPrefix, value: /api}, method: POST}]
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set: [{name: x-gateway, value: edge}]
+    - type: RequestMirror
+      requestMirror:
+        backendRef: {name: api-shadow, port: 8080}
+    backendRefs:
+    - {name: api, port: 8080, weight: 90}
+    - {name: api-canary, port: 8080, weight: 10}
+  - name: metrics
+    matches: [{path: {type: PathPrefix, value: /metrics}}]
+    backendRefs:
+    # In another namespace, and nothing grants it.
+    - {name: metrics, namespace: gwdemo-ai, port: 9100}
+  - name: legacy
+    matches: [{path: {type: PathPrefix, value: /legacy}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: legacy-erp}
+---
+# Redirects plain HTTP to HTTPS; no backend at all.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: https-redirect, namespace: gwdemo-apps}
+spec:
+  parentRefs:
+  - {name: edge, namespace: gwdemo-infra, sectionName: http}
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect: {scheme: https, statusCode: 301}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: legacy-erp, namespace: gwdemo-apps}
+spec:
+  static: {host: erp.dc1.acme.test, port: 8443}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: travel-agent, namespace: gwdemo-apps}
+spec:
+  a2a: {host: travel-agent.gwdemo-apps.svc.cluster.local, port: 9999}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: agents, namespace: gwdemo-apps}
+spec:
+  parentRefs:
+  - {name: edge, namespace: gwdemo-infra, sectionName: https}
+  hostnames: [agents.apps.acme.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /travel}}]
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: travel-agent}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata: {name: orders, namespace: gwdemo-apps}
+spec:
+  parentRefs:
+  - {name: internal, namespace: gwdemo-infra, sectionName: grpc}
+  rules:
+  - matches:
+    - method: {service: acme.orders.v1.Orders, method: Create}
+    - method: {service: acme.orders.v1.Orders, method: Get}
+    backendRefs:
+    - {name: orders, port: 9090}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: shop-edge-rules, namespace: gwdemo-apps}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: shop}
+  traffic:
+    basicAuthentication:
+      mode: Optional
+      realm: shop
+      secretRef: {name: shop-htpasswd}
+    extAuth:
+      backendRef: {name: opa, port: 9191}
+      grpc: {}
+    extProc:
+      backendRef: {name: header-enricher, port: 9002}
+    rateLimit:
+      local:
+      - {requests: 100, unit: Seconds, burst: 50}
+    hostRewrite: {mode: Auto}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: legacy-maintenance, namespace: gwdemo-apps}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: shop, sectionName: legacy}
+  traffic:
+    directResponse:
+      status: 503
+      body: The ERP is in maintenance.
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: erp-upstream, namespace: gwdemo-apps}
+spec:
+  targetRefs:
+  - {group: agentgateway.dev, kind: AgentgatewayBackend, name: legacy-erp}
+  backend:
+    tls:
+      caCertificateRefs: [{kind: ConfigMap, name: corp-root-ca}]
+      mtlsCertificateRef: [{name: erp-client-cert}]
+    health:
+      unhealthyCondition: response.code >= 500
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata: {name: api-tls, namespace: gwdemo-apps}
+spec:
+  targetRefs:
+  - {group: "", kind: Service, name: api}
+  validation:
+    hostname: api.internal.acme.test
+    wellKnownCACertificates: System
+---
+# A policy whose target does not exist.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: orphaned-limits, namespace: gwdemo-apps}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: checkout}
+  traffic:
+    rateLimit:
+      local:
+      - {requests: 10, unit: Seconds}
+---
+# ---------- access to the management UI ----------
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayRBACPolicy
+metadata: {name: gwdemo-ai-team, namespace: gwdemo-infra}
+spec:
+  principals:
+  - all:
+    - {attribute: groups, values: [gwdemo-ai-team]}
+  grants:
+  - name: routes
+    resource: agentgateway:httproutes
+    accessLevel: view
+    constraints:
+    - all:
+      - {attribute: namespace, values: [gwdemo-ai]}
+  - name: budgets
+    resource: agentgateway:budgets
+    accessLevel: manage
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayRoleBinding
+metadata: {name: gwdemo-viewers}
+spec:
+  roles: [viewer]
+  subjects:
+  - dimensions: {groups: [gwdemo-ai-team]}
