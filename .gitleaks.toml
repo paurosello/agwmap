@@ -1,0 +1,13 @@
+# gitleaks configuration for the secrets job in .github/workflows/ci.yml.
+# The anonymizer tests plant invented credentials on purpose; everything else
+# is scanned with the default rules.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Invented credentials that the anonymizer tests expect to be removed"
+paths = [
+  '''^testdata/leaks\.yaml$''',
+  '''^e2e_test\.go$''',
+]

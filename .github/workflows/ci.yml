@@ -31,6 +31,19 @@ jobs:
       - name: Build the release archives
         run: scripts/release.sh v0.0.0
 
+  # Scans the commits of the push or pull request for credentials. The fake
+  # ones the anonymizer tests use are allowlisted in .gitleaks.toml.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   # The same binary against a real API server: a kind cluster with the Gateway
   # API and agentgateway CRDs and testdata/demo.yaml.
   e2e:
