@@ -1,0 +1,47 @@
+name: commits
+
+# Every commit message, and the title of a pull request (the commit message of a
+# squash merge), must follow Conventional Commits: release-please reads them to
+# pick the next version and to write CHANGELOG.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          re='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert|style)(\([a-z0-9._/-]+\))?!?: [^ ]'
+          if [ "$EVENT" = pull_request ]; then
+            range="${PR_BASE}..${PR_HEAD}"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            range="${BEFORE}..${GITHUB_SHA}"
+          else
+            range="${GITHUB_SHA}~1..${GITHUB_SHA}"
+          fi
+          bad=0
+          while IFS= read -r line; do
+            echo "$line" | cut -d' ' -f2- | grep -qE "$re" || { echo "::error::not a Conventional Commit: $line"; bad=1; }
+          done < <(git log --no-merges --format='%h %s' "$range")
+          if [ "$EVENT" = pull_request ] && ! printf '%s\n' "$PR_TITLE" | grep -qE "$re"; then
+            echo "::error::pull request title is not a Conventional Commit: $PR_TITLE"
+            bad=1
+          fi
+          exit "$bad"

@@ -11,5 +11,7 @@ out/
 /*.json
 !/crds.lock.json
 !/renovate.json
+!/release-please-config.json
+!/.release-please-manifest.json
 
 .DS_Store

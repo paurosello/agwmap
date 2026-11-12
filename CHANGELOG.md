@@ -1,10 +1,8 @@
 # Changelog
 
-All notable changes to agwmap are listed here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
-[Semantic Versioning](https://semver.org/).
-
-## [Unreleased]
+All notable changes to agwmap are listed here. Versions follow
+[Semantic Versioning](https://semver.org/). From 0.1.0 on, each section is written by release-please
+from the [Conventional Commits](https://www.conventionalcommits.org/) merged into the release.
 
 ## [0.1.0] - 2026-11-12
 
@@ -46,5 +44,4 @@ First release.
 - End-to-end tests, run on every push and pull request: the binary against a fake API server, and
   against a kind cluster with `testdata/demo.yaml`.
 
-[Unreleased]: https://github.com/paurosello/agwmap/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/paurosello/agwmap/releases/tag/v0.1.0
