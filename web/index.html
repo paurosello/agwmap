@@ -40,7 +40,8 @@ main{padding:16px}
   border-radius:var(--radius);padding:8px 12px;margin-bottom:12px}
 .mut{color:var(--mut)} .mono{font-family:var(--mono);font-size:.92em}
 .empty{color:var(--mut);font-style:italic}
-[data-open]{cursor:pointer}
+[data-open],[data-goto]{cursor:pointer}
+[data-goto]:hover{text-decoration:underline}
 .tag{display:inline-block;padding:0 7px;border:1px solid color-mix(in srgb,var(--c,var(--other)) 60%,var(--panel));border-radius:var(--radius);
   font-family:var(--mono);font-size:.85em;line-height:16px;white-space:nowrap;color:var(--c,var(--ink));
   background:color-mix(in srgb,var(--c,var(--other)) 10%,var(--panel))}
@@ -66,6 +67,8 @@ pre .y{color:var(--key)}
 .tree .r{padding:4px 6px 4px 24px;border-radius:calc(var(--radius) - 1px);cursor:pointer}
 .tree .r:hover{background:var(--soft)}
 .tree .r.on{background:color-mix(in srgb,var(--accent) 45%,var(--panel));color:var(--onaccent);box-shadow:inset 3px 0 0 var(--key)}
+.tree .r[style]{padding-left:calc(24px + var(--d) * 14px)}
+.tree .r .kid{color:var(--key);margin-right:5px}
 .tree .r small{display:block;opacity:.75;font-family:var(--mono);font-size:.85em;word-break:break-all}
 .flow{max-width:900px}
 .stage{position:relative;padding:0 0 18px 30px;border-left:1px solid var(--line);margin-left:11px}
@@ -104,6 +107,20 @@ pre .y{color:var(--key)}
 .badge.go{border-color:var(--gateway);color:var(--gateway)}
 .badge.also{border-color:var(--ratelimit);color:var(--ratelimit);margin-left:auto}
 .feat.filter{margin:0 0 8px;padding:0 0 8px;border-top:0;border-bottom:1px dashed var(--hair)}
+.summary{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:8px 12px 10px;margin-bottom:18px}
+.summary .sh{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:6px}
+.summary .sh label{margin-left:auto;color:var(--mut);font-size:.92em;cursor:pointer;user-select:none}
+.sl{padding:2px 0 2px calc(var(--d) * 20px);display:flex;flex-wrap:wrap;gap:3px 8px;align-items:baseline}
+.sl::before{content:"└";color:var(--line);font-family:var(--mono);margin-right:-2px}
+.sl[style="--d:0"]::before{content:none}
+.sl .nm{cursor:pointer;font-weight:600}
+.sl .nm:hover{color:var(--key)}
+.sl .nm .k{font-family:var(--mono);font-size:.85em;font-weight:400;color:var(--mut)}
+.does{font-size:.88em;border-radius:var(--radius);padding:0 6px;color:var(--key);background:color-mix(in srgb,var(--accent) 22%,var(--panel))}
+/* Settings collapsed: what each object configures stays, its YAML is one click away in the drawer. */
+.flowwrap.terse .feat>pre,.flowwrap.terse .feat>details{display:none}
+.flowwrap.terse .feat:not(:has(.fh)){display:none}
+.flowwrap.terse .feat .fh{margin-bottom:0}
 
 .tw{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
 table{border-collapse:collapse;width:100%}
@@ -248,15 +265,18 @@ function targetsOf(b) {
   const st = t => t.static || t;
   const host = t => { const x = st(t); return x.backendRef ? `Service/${x.backendRef.name}${x.port ? ":" + x.port : ""}${x.path || ""}`
     : `${x.host || x.unixPath || ""}${x.port ? ":" + x.port : ""}${x.path || ""}`; };
+  // where a target sends the request, to find out whether that is a gateway again
+  const addr = t => { const x = st(t); return {host: x.backendRef ? `${x.backendRef.name}.${x.backendRef.namespace || b.ns}.svc` : x.host, port: x.port, path: x.path}; };
   for (const k of ["mcp", "entMcp"]) for (const t of (s[k] && s[k].targets) || [])
-    out.push({name: t.name, where: t.selector ? "services selected by label" : host(t), proto: (t.static && t.static.protocol) || "MCP"});
+    out.push({name: t.name, where: t.selector ? "services selected by label" : host(t), proto: (t.static && t.static.protocol) || "MCP",
+      mcp: true, inline: Object.keys(st(t).policies || {}), addr: t.selector ? null : addr(t)});
   if (s.ai) {
     const provs = s.ai.provider ? [s.ai.provider] : (s.ai.groups || []).flatMap((g, i) => (g.providers || []).map(p => ({...p, _group: i + 1})));
     for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";
       out.push({name: p.name || k, where: [k, p[k] && p[k].model, p[k] && p[k].region, p.host].filter(Boolean).join(" · "), proto: p._group ? `LLM · priority ${p._group}` : "LLM"}); }
   }
-  if (s.static) out.push({name: "static", where: host(s.static), proto: "HTTP"});
-  if (s.a2a) out.push({name: "a2a", where: host(s.a2a), proto: "A2A"});
+  if (s.static) out.push({name: "static", where: host(s.static), proto: "HTTP", addr: addr(s.static)});
+  if (s.a2a) out.push({name: "a2a", where: host(s.a2a), proto: "A2A", addr: addr(s.a2a)});
   for (const [k, v] of Object.entries(s.aws || {})) // agentCore: runtime ARN, region, account
     out.push({name: k, where: Object.entries(v || {}).filter(x => typeof x[1] !== "object").map(x => `${x[0]}=${x[1]}`).join(" · "), proto: "AWS"});
   if (b.kind === "InferencePool") {
@@ -280,6 +300,32 @@ function targetsOf(b) {
   }
   return out;
 }
+// Whether a request path is taken by an HTTPRoute path match.
+function pathMatches(p, path) {
+  if (!p) return true;
+  const v = p.value ?? "/";
+  if (p.type === "Exact") return path === v;
+  if (p.type === "RegularExpression") { try { return new RegExp(`^(?:${v})$`).test(path); } catch (_) { return false; } }
+  return v === "/" || path === v || path.startsWith(v.replace(/\/$/, "") + "/"); // PathPrefix, element-wise
+}
+// A target addressed to the proxy Service of a captured gateway (name.namespace.svc) goes
+// back into that gateway: to the listener on its port and the route whose rule takes its path.
+// Returns {gw, le, r}, with le and r missing when nothing there takes it.
+function intoGateway(addr) {
+  const m = addr && /^([^.:]+)\.([^.:]+)\.svc(\.cluster\.local)?$/.exec(addr.host || "");
+  const gw = m && gateways.find(g => g.name === m[1] && g.ns === m[2]);
+  if (!gw) return null;
+  const le = listenersOf(gw).find(x => x.l.port === (addr.port || 80));
+  if (!le) return {gw};
+  const path = addr.path || "/";
+  const r = routesOf(gw, le).find(r => { const hs = spec(r).hostnames || [];
+    return (!hs.length || hs.some(h => hostsOverlap(h, addr.host))) && (spec(r).rules || [{}]).some(ru => (ru.matches || [{}]).some(mt => pathMatches(mt.path, path))); });
+  return {gw, le, r};
+}
+// the sidebar entry of the route a target lands on, and the attributes that lead there on a click
+const flowKey = to => to.r && to.le ? [to.r.id, to.gw.id, (to.le.via ? to.le.via.id : "") + "#" + to.le.l.name].join("|") : "";
+const goto = to => flowKey(to) ? `data-goto="${esc(flowKey(to))}" title="Show the flow of route ${esc(to.r.name)}"` : `data-open="${esc(to.gw.id)}"`;
+const intoText = to => `continues at gateway ${to.gw.name}${to.le ? ` · ${to.le.l.name}` : " · no listener on that port"}${to.le ? to.r ? ` · route ${to.r.name}` : " · no route takes the path" : ""}`;
 const matchText = m => {
   const p = m.path ? `${m.path.type || "PathPrefix"} ${m.path.value ?? "/"}` : "";
   const pairs = list => (list || []).map(x => `${x.name}${x.type === "RegularExpression" ? "~" : "="}${x.value}`).join(",");
@@ -339,7 +385,11 @@ function feature(src, f) {
 const feats = n => (n.features || []).map(f => feature(n, f)).join("");
 const specBlock = n => { const s = spec(n); return Object.keys(s).length ? `<div class="feat">${block(s, "spec")}</div>` : ""; };
 // what a backend-like object points at, and its inline policies
-const backendBody = b => { const ts = b.external ? [] : targetsOf(b); return (ts.length ? kv(ts.map(t => [t.name, `${t.proto} · ${t.where}`])) : "") + feats(b); };
+const backendBody = b => { const ts = b.external ? [] : targetsOf(b);
+  // targets that go back into a captured gateway, with a link to where they land
+  const back = ts.map(t => [t, intoGateway(t.addr)]).filter(x => x[1]).map(([t, to]) =>
+    `<div class="uses"><span class="ct">${esc(t.name)} continues at</span><span class="chip" data-open="${esc(to.gw.id)}"><span class="k">Gateway</span> ${esc(to.gw.name)}${to.le ? ` <span class="k">#${esc(to.le.l.name)}</span>` : ""}</span>${to.r ? `<span class="chip" data-goto="${esc(flowKey(to))}" title="Show the flow of this route"><span class="k">${esc(to.r.kind)}</span> ${esc(to.r.name)}</span>` : `<span class="badge bad">${esc(intoText(to).replace(/^.* · /, ""))}</span>`}</div>`).join("");
+  return (ts.length ? kv(ts.map(t => [t.name, `${t.proto} · ${t.where}`])) : "") + back + feats(b); };
 const bodyOf = n => n.role === "backend" ? backendBody(n) : (n.features || []).length ? feats(n) : specBlock(n);
 // A reference that leaves its namespace. Gateway API requires a ReferenceGrant for
 // route backends and listener certificates; for other references it is only noted.
@@ -403,6 +453,19 @@ for (const r of routes) {
   else if (!isChildRoute(r)) entries.push({grp: NONE, r});
 }
 entries.forEach(e => e.key = [e.r ? e.r.id : "", e.gw ? e.gw.id : e.svc ? e.svc.id : "", e.le ? (e.le.via ? e.le.via.id : "") + "#" + e.le.l.name : ""].join("|"));
+// Routes that a backend target sends back through a gateway: entry key -> [{key, target}].
+// In the sidebar they hang under the route that leads to them, when some route that is not
+// itself reached that way leads to them (two routes that only lead to each other stay on top).
+const backInto = new Map();
+for (const e of entries) if (e.r) for (const list of ruleBackends(e.r).values()) for (const {b} of list) {
+  if (b.role === "route" || b.external) continue;
+  for (const t of targetsOf(b)) { const k = flowKey(intoGateway(t.addr) || {});
+    if (k && k !== e.key && entries.some(x => x.key === k) && !(backInto.get(e.key) || []).some(c => c.key === k)) push(backInto, e.key, {key: k, target: t.name}); }
+}
+const nestedKeys = new Set();
+{ const reached = new Set([...backInto.values()].flat().map(c => c.key));
+  const walk = k => { for (const c of backInto.get(k) || []) if (!nestedKeys.has(c.key)) { nestedKeys.add(c.key); walk(c.key); } };
+  for (const e of entries) if (!reached.has(e.key)) walk(e.key); }
 
 // the rules of a route: matches, filters, backends and what is attached to them
 // The filters of a rule or of one backendRef (at: their path in the route), each
@@ -449,13 +512,67 @@ function settingsOnPath(e, gwPols) {
   if (e.r) walk(e.r, 0);
   return m;
 }
+/* ---------- summary ---------- */
+// Whether the flow shows the YAML of each setting; on by default, remembered in this browser.
+let showConfig = true;
+try { showConfig = localStorage.getItem("agwmap.showConfig") !== "0"; } catch (_) {}
+// The flow in a few lines, without the settings: what is reached and what each step does.
+// A setting in words: entTokenExchange -> token exchange, mcp.authorization -> authorization.
+const said = k => k.replace(/^(ai|mcp)\./, "").replace(/^ent(?=[A-Z])/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+// what the policies in a list do, each setting once
+const doing = list => [...new Set(list.flatMap(({p}) => (p.features || []).map(f => said(f.key))))];
+const words = (ws, none = "") => ws.length ? ws.map(w => `<span class="does">${esc(w)}</span>`).join("") : none ? `<span class="mut">${none}</span>` : "";
+const nm = n => `<span class="nm" data-open="${esc(n.id)}"><span class="k">${esc(n.kind)}</span> ${esc(n.name)}</span>`;
+function summaryHtml(e, gwPols) {
+  const lines = [], count = {rules: 0, backends: new Set(), targets: 0, with: new Map(), back: 0};
+  const line = (depth, body) => lines.push(`<div class="sl" style="--d:${depth}">${body}</div>`);
+  if (e.gw) line(0, `${nm(e.gw)} <span class="mut mono">${esc(e.le.l.name)} · ${esc(e.le.l.protocol)} :${esc(e.le.l.port)}</span>${words(doing(gwPols))}`);
+  else if (e.svc) line(0, `${nm(e.svc)} <span class="mut">in the mesh</span>${words(doing(gwPols))}`);
+  const route = (r, depth, seen) => {
+    line(depth, `${nm(r)}${words(doing(polsOn(r.id)))}`);
+    if (seen.has(r.id)) return;
+    seen.add(r.id);
+    const rb = ruleBackends(r), l4 = ["TLSRoute", "TCPRoute", "UDPRoute"].includes(r.kind);
+    (spec(r).rules || [{}]).forEach((ru, ri) => {
+      count.rules++;
+      const list = rb.get(ri) || [], filters = (ru.filters || []).map(f => said(f.type));
+      line(depth + 1, `<span class="mono">${esc(l4 ? "all connections" : (ru.matches || [{}]).map(matchText).join(" | "))}</span>${words(filters)}${list.length ? "" : ` <span class="mut">${filters.length ? "answered by the filters" : "no backend"}</span>`}`);
+      for (const {b, weight} of list) {
+        if (b.role === "route") { route(b, depth + 2, seen); continue; }
+        count.backends.add(b.id);
+        const ts = b.external ? [] : targetsOf(b).filter(t => t.name !== "settings"), pols = polsOn(b.id);
+        const mcp = ts.filter(t => t.mcp), what = mcp.length ? `MCP · ${mcp.length} target${mcp.length > 1 ? "s" : ""}` : ts.length === 1 ? ts[0].proto : ts.length && ts.every(t => t.proto.startsWith("LLM")) ? `LLM · ${ts.length} providers` : ts.length ? `${ts.length} targets` : "";
+        const own = doing([...pols.filter(x => !x.section || !ts.some(t => t.name === x.section)), {p: b}]);
+        line(depth + 2, `${nm(b)}${what ? ` <span class="mut">${esc(what)}</span>` : ""}${weight !== undefined && list.length > 1 ? ` <span class="badge">weight ${esc(weight)}</span>` : ""}${continues(b)}${words(own)}`);
+        // Several targets, or one that goes back into a gateway: one line each, with what is
+        // attached to that target alone (sectionName), and the route it reaches there: only its
+        // name and policies, its rules and backends are in the flow of that route.
+        const into = ts.map(t => intoGateway(t.addr));
+        if (ts.length > 1 || into.some(Boolean)) ts.forEach((t, ti) => {
+          const ws = [...doing(pols.filter(x => x.section === t.name)), ...(t.inline || []).map(said)], to = into[ti];
+          if (t.mcp) { count.targets++; for (const w of ws) count.with.set(w, (count.with.get(w) || 0) + 1); }
+          if (to) count.back++;
+          line(depth + 3, `<span class="mono">${esc(t.name)}</span> <span class="mut">${esc(t.where)}</span>${words(ws)}${to && !to.r ? `<span class="badge bad" data-open="${esc(to.gw.id)}">${esc(intoText(to))}</span>` : ""}`);
+          if (to && to.r) line(depth + 4, `<span class="nm" ${goto(to)}><span class="k">${esc(to.r.kind)}</span> ${esc(to.r.name)}</span>${words(doing(polsOn(to.r.id)))}`);
+        });
+      }
+    });
+  };
+  if (e.r) route(e.r, e.gw || e.svc ? 1 : 0, new Set());
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const head = e.r ? [plural(count.rules, "rule"), plural(count.backends.size, "backend"),
+    count.targets ? plural(count.targets, "MCP target") + [...count.with].map(([w, n]) => `, ${n} with ${w}`).join("") : "",
+    count.back ? `${count.back} back through a gateway` : ""].filter(Boolean).join(" · ") : "no route";
+  return `<div class="summary"><div class="sh"><b>Summary</b><span class="mut">${esc(head)}</span><label><input type="checkbox" class="showcfg"${showConfig ? " checked" : ""}> show settings</label></div>${lines.join("")}</div>`;
+}
+
 function flowHtml(e) {
   const r = e.r, {l, via} = e.le || {}, cls = e.gw && outE(e.gw.id).find(x => x.type === "class");
   const gwPols = e.gw ? [...polsOn(e.gw.id).filter(x => !x.section || (!via && x.section === l.name)),
       ...(via ? polsOn(via.id).filter(x => !x.section || x.section === l.name) : []), ...(cls ? polsOn(cls.to) : [])]
     : e.svc ? polsOn(e.svc.id) : [];
   sameSetting = settingsOnPath(e, gwPols);
-  let h = "", i = 1;
+  let h = summaryHtml(e, gwPols), i = 1;
   if (e.gw) {
     const lkv = kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
       ["tls", l.tls ? [l.tls.mode || "Terminate", (l.tls.certificateRefs || []).map(c => c.name).join(", ")].filter(Boolean).join(" · ") : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
@@ -494,12 +611,27 @@ let sel = null;
 const collapsed = new Set(); // groups folded away in the sidebar
 function viewFlow(root) {
   if (!sel || !entries.some(e => e.key === sel)) sel = (entries.find(e => e.r) || entries[0] || {}).key || null;
-  root.innerHTML = `<div class="flowwrap"><nav class="tree"></nav><div class="flow"></div></div>`;
+  root.innerHTML = `<div class="flowwrap${showConfig ? "" : " terse"}"><nav class="tree"></nav><div class="flow"></div></div>`;
   const tree = root.querySelector(".tree"), flow = root.querySelector(".flow");
+  flow.addEventListener("change", ev => {
+    if (!ev.target.matches(".showcfg")) return;
+    showConfig = ev.target.checked;
+    root.querySelector(".flowwrap").classList.toggle("terse", !showConfig);
+    try { localStorage.setItem("agwmap.showConfig", showConfig ? "1" : "0"); } catch (_) {}
+  });
+  const row = (e, depth, via) => `<div class="r ${e.key === sel ? "on" : ""}" data-k="${esc(e.key)}"${depth ? ` style="--d:${depth}"` : ""}>${e.r
+    ? `${depth ? `<span class="kid">↳</span>` : ""}${esc(e.r.name)}<small>${via ? `from target ${esc(via)} · ` : ""}${esc(e.r.kind === "HTTPRoute" ? "" : e.r.kind + " · ")}${esc((spec(e.r).hostnames || []).join(", ") || e.r.ns)}</small>`
+    : `<span class="empty">no routes attached</span>`}</div>`;
+  // the routes a route's targets lead back to, under it (once per path, so a loop ends)
+  const kids = (e, depth, seen) => (backInto.get(e.key) || []).filter(c => !seen.has(c.key)).map(c => {
+    const k = entries.find(x => x.key === c.key);
+    return row(k, depth, c.target) + kids(k, depth + 1, new Set([...seen, c.key]));
+  }).join("");
   const paint = q => {
     let h = "", lastG = null, lastL = null;
     for (const e of entries) {
       if (q && !(e.r ? hay(e.r) : hay(e.gw)).includes(q)) continue;
+      if (!q && nestedKeys.has(e.key)) continue; // drawn under the route that leads to it; a filter lists every match flat
       const shut = collapsed.has(e.grp.id);
       if (e.grp !== lastG) {
         const n = entries.filter(x => x.grp === e.grp && x.r).length;
@@ -513,7 +645,7 @@ function viewFlow(root) {
           : `<div class="l">Service ${esc(e.svc.ns)}/${esc(e.svc.name)}</div>`;
         lastL = lkey;
       }
-      h += `<div class="r ${e.key === sel ? "on" : ""}" data-k="${esc(e.key)}">${e.r ? `${esc(e.r.name)}<small>${esc(e.r.kind === "HTTPRoute" ? "" : e.r.kind + " · ")}${esc((spec(e.r).hostnames || []).join(", ") || e.r.ns)}</small>` : `<span class="empty">no routes attached</span>`}</div>`;
+      h += row(e, 0) + (q ? "" : kids(e, 1, new Set([e.key])));
     }
     tree.innerHTML = h || `<div class="empty">No routes match</div>`;
   };
@@ -623,6 +755,15 @@ drawer.addEventListener("click", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") drawer.classList.remove("on"); });
 document.addEventListener("click", e => {
   if (e.target.closest("summary") || String(getSelection())) return; // expanding or selecting text is not a click on the card
+  const go = e.target.closest("[data-goto]");
+  if (go) { // to the flow of another route: select it in the sidebar and draw it
+    sel = go.dataset.goto;
+    drawer.classList.remove("on");
+    if (location.hash !== "#flow") location.hash = "flow";
+    render();
+    scrollTo(0, 0);
+    return;
+  }
   const el = e.target.closest("[data-open]");
   if (el) openDetail(el.dataset.open);
   else if (!e.target.closest("#drawer")) drawer.classList.remove("on");

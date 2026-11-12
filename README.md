@@ -4,7 +4,7 @@ agwmap reads the gateway configuration of a Kubernetes cluster and turns it into
 HTML page that shows what happens to a request: which listener takes it, which policies apply at each
 level, which route matches, and where it ends up.
 
-![The request flow of one route: listener, gateway policies, route, route policies, backends](docs/screenshot.png)
+![The request flow of one route: a summary, then listener, gateway policies, route, route policies, backends](docs/screenshot.png)
 
 ## What it is for
 
@@ -12,6 +12,18 @@ The page is meant for a setup you did not build. Pick a route and read its path 
 listener, gateway policies, route, route policies, backends and their upstream targets. Policies are
 labelled by what they do (authentication, rate limiting, guardrails, token exchange) and not only by
 their kind.
+
+Each route starts with a summary of that path in a few lines: the gateway, the route, its rules, the
+backends and their targets, each with what is configured on it, and a count such as "1 rule · 1 backend
+· 4 MCP targets, 3 with connector". Untick "show settings" to hide the YAML of each setting
+and keep only what each object configures; the page remembers the choice, and clicking any object
+shows its full YAML either way.
+
+A backend target addressed to a gateway's own Service (`<gateway>.<namespace>.svc.cluster.local`)
+sends the request back into that gateway. The map follows it to the listener on that port and the
+route that takes its path, and draws that route under the target, or flags the target when nothing
+there takes it. Clicking that route opens its flow, and the sidebar lists it under the route it is
+reached from.
 
 It also points at what is wrong or unused. Objects with a failing status condition are flagged, as are
 cross-namespace references without a ReferenceGrant and settings configured at more than one level.
@@ -169,7 +181,7 @@ With anonymization, which is the default:
 | E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
 | Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
 | Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |
-| The kube context name, and the user and server named in warnings | |
+| The kube context name, and the user and server named in warnings | In-cluster hostnames (`name.namespace.svc`) of a captured Gateway's proxy Service or of a Service an object refers to, so that a target that goes back through a gateway can be followed |
 
 Anonymization works by recognising values, so it can miss one it has no rule for, and it does not try
 to hide what your objects are called. If a name gives away more than you want to share, or you find a
