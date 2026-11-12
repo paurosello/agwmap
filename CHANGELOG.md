@@ -6,6 +6,8 @@ All notable changes to agwmap are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-12
+
 First release.
 
 ### Added
@@ -44,4 +46,5 @@ First release.
 - End-to-end tests, run on every push and pull request: the binary against a fake API server, and
   against a kind cluster with `testdata/demo.yaml`.
 
-[Unreleased]: https://github.com/paurosello/agwmap/commits/main
+[Unreleased]: https://github.com/paurosello/agwmap/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/paurosello/agwmap/releases/tag/v0.1.0
