@@ -595,6 +595,41 @@ stringData: {token: sk-leak-from-a-manifest}
 	}
 }
 
+// Without -o the page goes to a new file in the temp folder, and no browser is
+// opened when stderr is not a terminal.
+func TestDefaultOutput(t *testing.T) {
+	demo, err := filepath.Abs("testdata/demo.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	cmd := exec.Command(bin, "-from", demo)
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
+	stderr, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("agwmap: %v\n%s", err, stderr)
+	}
+	pages, _ := filepath.Glob(filepath.Join(tmp, "agwmap-*.html"))
+	if len(pages) != 1 || !strings.Contains(string(stderr), pages[0]) {
+		t.Fatalf("pages in the temp folder: %v, stderr %q", pages, stderr)
+	}
+	if st, err := os.Stat(pages[0]); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("the page is not private to its owner: %v %v", st.Mode(), err)
+	}
+	raw, err := os.ReadFile(pages[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	graphOf(t, string(raw))
+	if strings.Contains(string(stderr), "browser") {
+		t.Errorf("stderr is not a terminal, but: %q", stderr)
+	}
+	if left, _ := os.ReadDir(cmd.Dir); len(left) != 0 {
+		t.Errorf("files left in the working directory: %v", left)
+	}
+}
+
 func TestNamespace(t *testing.T) {
 	c := newCluster(t)
 	s := snapshotOf(t, out(t, c.kubeconfig, "ns.yaml", "-n", "leak-test"))

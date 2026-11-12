@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -51,7 +53,7 @@ type snapshotHead struct {
 
 type options struct {
 	kubeconfig, kubeContext, namespace, from, out string
-	anonymize                                     bool
+	anonymize, open                               bool
 }
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
@@ -73,7 +75,8 @@ func main() {
 	flag.BoolVar(&allNamespaces, "A", false, "read all namespaces (the default; accepted for kubectl parity)")
 	flag.BoolVar(&allNamespaces, "all-namespaces", false, "same as -A")
 	flag.StringVar(&o.from, "from", "", "render a YAML file instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
-	flag.StringVar(&o.out, "o", "agwmap.html", "output file, or - for stdout; a .yaml name writes a snapshot instead of the page")
+	flag.StringVar(&o.out, "o", "", "output file, or - for stdout; a .yaml name writes a snapshot instead of the page (default: a new file in the temp folder)")
+	flag.BoolVar(&o.open, "open", true, "open the page in the default browser when stderr is a terminal; -open=false only writes it")
 	flag.BoolVar(&o.anonymize, "anonymize", true, "replace hostnames, URLs, addresses, account ids and inline credentials with pseudonyms, and keep only gateway labels and annotations (object names and namespaces are kept); -anonymize=false keeps the real values")
 	flag.BoolVar(&showVersion, "version", false, "print the version and exit")
 	flag.Usage = func() {
@@ -99,10 +102,15 @@ func main() {
 		o.namespace = ""
 	}
 
-	// Look for a newer release while the map is made. Only when someone is
-	// there to read the answer: not in a pipeline or a CI job.
-	notice := make(chan string, 1)
+	// Look for a newer release while the map is made, and open the page in a
+	// browser. Only when someone is there: not in a pipeline or a CI job.
+	interactive := false
 	if st, err := os.Stderr.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
+		interactive = true
+	}
+	o.open = o.open && interactive
+	notice := make(chan string, 1)
+	if interactive {
 		go func() { notice <- updateNotice(version) }()
 	} else {
 		notice <- ""
@@ -148,7 +156,8 @@ func run(o options) error {
 	}
 
 	var data []byte
-	if strings.HasSuffix(o.out, ".yaml") || strings.HasSuffix(o.out, ".yml") {
+	isSnapshot := strings.HasSuffix(o.out, ".yaml") || strings.HasSuffix(o.out, ".yml")
+	if isSnapshot {
 		data, err = snap.yaml()
 	} else {
 		g := buildGraph(objs)
@@ -166,7 +175,21 @@ func run(o options) error {
 		_, err = os.Stdout.Write(data)
 		return err
 	}
-	if err := os.WriteFile(o.out, data, 0o644); err != nil {
+	if o.out == "" {
+		// A new file each run, readable only by its owner: it holds cluster data.
+		f, err := os.CreateTemp("", "agwmap-*.html")
+		if err != nil {
+			return err
+		}
+		o.out = f.Name()
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+	} else if err := os.WriteFile(o.out, data, 0o644); err != nil {
 		return err
 	}
 	mode := "anonymized"
@@ -174,7 +197,30 @@ func run(o options) error {
 		mode = "NOT anonymized"
 	}
 	fmt.Fprintf(os.Stderr, "%d objects from %s (%s) -> %s\n", len(snap.Objects), snap.Meta.Context, mode, o.out)
+	if o.open && !isSnapshot {
+		if err := openBrowser(o.out); err != nil {
+			fmt.Fprintf(os.Stderr, "agwmap: could not open a browser (%v); open %s yourself\n", err, o.out)
+		}
+	}
 	return nil
+}
+
+// openBrowser shows a local file in the default browser and does not wait for it.
+func openBrowser(file string) error {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return err
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", abs)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", abs)
+	default:
+		cmd = exec.Command("xdg-open", abs)
+	}
+	return cmd.Start()
 }
 
 // yaml is the snapshot as a file.

@@ -33,7 +33,7 @@ spec:
     policies at each level, route, backends and upstream targets.
     Captures are anonymized by default and can be exported and rendered again.
 
-      kubectl agwmap                       # current context -> agwmap.html
+      kubectl agwmap                       # current context, opened in the browser
       kubectl agwmap -n team-a -o a.html
       kubectl agwmap -from snapshot.yaml
   platforms:

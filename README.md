@@ -54,8 +54,9 @@ go install github.com/paurosello/agwmap@latest
 ## Use it
 
 ```sh
-kubectl agwmap                                  # current kube context -> agwmap.html, anonymized
+kubectl agwmap                                  # current kube context, anonymized, opened in the browser
 kubectl agwmap --context prod -n team-a -o a.html
+kubectl agwmap -open=false                      # only write the page and print where
 kubectl agwmap -o snapshot.yaml                 # capture only, to send to someone
 kubectl agwmap -from snapshot.yaml -o a.html    # render a capture you received
 kubectl agwmap -from manifests.yaml             # render a manifest, without a cluster
@@ -68,7 +69,8 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 |---|---|
 | `--context`, `--kubeconfig` | Which cluster to read. Default: the current context. |
 | `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
-| `-o` | Output file, `agwmap.html` by default; `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
+| `-o` | Output file. Default: a new `agwmap-*.html` in the temp folder, readable only by you. `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
+| `-open=false` | Do not open the page in the default browser. It is opened only when stderr is a terminal, so pipelines and CI jobs never open one. |
 | `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. |
 | `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a manifest or a snapshot that was not. |
 | `-version` | Print the version. |
