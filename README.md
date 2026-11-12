@@ -29,8 +29,9 @@ run agwmap and send you the snapshot file, then render the same page from it.
 agwmap is read-only. It discovers the gateway API groups and lists their objects. Secrets, ConfigMaps
 and Services are never read; they appear only as names that something refers to.
 
-It covers the Gateway API and agentgateway (open source and enterprise), including inference pools.
-kgateway objects are read too, but that path has not been tested yet.
+It covers the Gateway API and agentgateway (open source and enterprise), including inference pools:
+see [supported resources](#supported-resources). kgateway objects are read too, but that path has not
+been tested yet.
 
 ## Install
 
@@ -76,6 +77,66 @@ out and named in a warning at the top of the page.
 
 To try it without a gateway of your own, apply [`examples/demo.yaml`](examples/demo.yaml) to a cluster
 that has the Gateway API and agentgateway CRDs.
+
+## Supported resources
+
+agwmap reads every kind served under the gateway API groups, so nothing has to be listed for it to be
+captured: a kind it has no rule for still appears in the Resources and Raw tabs, attached where it
+points if it has `targetRefs`, and otherwise under "Outside the flow". The kinds below are the ones the
+map knows how to draw.
+
+### Gateway API
+
+Checked against Gateway API v1.7.0, standard and experimental channels. Older served versions of a
+kind (`v1beta1`, `v1alpha2`, `v1alpha3`) are read the same way.
+
+| Kind | Group | In the map |
+|---|---|---|
+| GatewayClass | `gateway.networking.k8s.io` | Under the gateway that uses it, with its parameters and the policies attached to it |
+| Gateway | `gateway.networking.k8s.io` | Start of a flow, one per listener: protocol, port, hostname, TLS, certificates, the listener's status |
+| ListenerSet | `gateway.networking.k8s.io` | Adds its listeners to the parent gateway; flagged when the gateway's `allowedListeners` does not admit it |
+| XListenerSet | `gateway.networking.x-k8s.io` | The same (Gateway API v1.3 and v1.4) |
+| HTTPRoute | `gateway.networking.k8s.io` | Route: hostnames, per rule the matches, filters, timeouts, retry and backends with weight and port |
+| GRPCRoute | `gateway.networking.k8s.io` | Route, with gRPC service and method matches |
+| TLSRoute | `gateway.networking.k8s.io` | Route on a TLS listener, with its SNI hostnames |
+| TCPRoute | `gateway.networking.k8s.io` | Route on a TCP listener |
+| UDPRoute | `gateway.networking.k8s.io` | Route on a UDP listener |
+| ReferenceGrant | `gateway.networking.k8s.io` | Checked for every route backend and listener certificate in another namespace; a missing one is flagged |
+| BackendTLSPolicy | `gateway.networking.k8s.io` | Policy on the backend it targets |
+| XBackendTrafficPolicy | `gateway.networking.x-k8s.io` | Policy on the backend it targets |
+| XTelemetryPolicy | `gateway.networking.x-k8s.io` | Policy on the gateway or route it targets |
+| XBackend | `gateway.networking.x-k8s.io` | Backend, with its hostname or pod selector |
+| XMesh | `gateway.networking.x-k8s.io` | Listed under "Outside the flow": it is not on a request path |
+
+A route attaches to a listener by section name, port, protocol, `allowedRoutes` and hostname. Routes
+can also be attached to a Service (mesh) or to another route (delegation).
+
+### Inference extension
+
+| Kind | Group | In the map |
+|---|---|---|
+| InferencePool | `inference.networking.k8s.io`, `inference.networking.x-k8s.io` | Backend: pod selector, target ports and endpoint picker |
+| InferencePoolImport | `inference.networking.x-k8s.io` | Backend, by name only (it has no spec) |
+| InferenceObjective | `inference.networking.x-k8s.io` | Under the pool it refers to |
+
+### agentgateway
+
+| Kind | Group | In the map |
+|---|---|---|
+| AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does |
+| AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS |
+| AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
+| AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
+| EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings |
+| EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend |
+| EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it |
+| EnterpriseAgentgatewayBudget | `enterpriseagentgateway.solo.io` | Under the policy that enforces it |
+| EnterpriseAgentgatewayExternalSecret | `enterpriseagentgateway.solo.io` | Under the object that refers to it |
+| EnterpriseAgentgatewayRBACPolicy, EnterpriseAgentgatewayRoleBinding | `enterpriseagentgateway.solo.io` | Listed under "Outside the flow": access to the management UI, not to traffic |
+| EnterpriseListenerSet | `enterprise.solo.io` | Adds its listeners to the parent gateway |
+| AuthConfig | `extauth.solo.io` | Under the policy that refers to it |
+| RateLimitConfig | `ratelimit.solo.io` | Under the policy that refers to it |
+| WAFPolicy | `waf.solo.io` | Under the policy that refers to it |
 
 ## What a capture keeps
 

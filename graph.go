@@ -138,6 +138,9 @@ func nodeFor(u *unstructured.Unstructured) *Node {
 
 func roleOf(kind string, spec map[string]any) string {
 	_, hasRefs := spec["targetRefs"]
+	if _, ok := spec["targetRef"]; ok {
+		hasRefs = true // the older, singular form of policy attachment
+	}
 	_, hasSel := spec["targetSelectors"]
 	switch {
 	case kind == "GatewayClass":
@@ -152,7 +155,7 @@ func roleOf(kind string, spec map[string]any) string {
 		// What makes a policy is that it attaches to something. A WAFPolicy or an
 		// RBACPolicy is configuration that other objects point at, or none do.
 		return "policy"
-	case strings.HasSuffix(kind, "Backend") || strings.HasSuffix(kind, "Model") || kind == "InferencePool":
+	case strings.HasSuffix(kind, "Backend") || strings.HasSuffix(kind, "Model") || kind == "InferencePool" || kind == "InferencePoolImport":
 		return "backend"
 	case strings.HasSuffix(kind, "Parameters"):
 		return "params"
@@ -260,6 +263,9 @@ func (b *builder) link(n *Node) {
 		}
 	}
 	b.linkBudgets(n, spec)
+	if n.Kind == "ReferenceGrant" {
+		return // spec.to names what may be referred to, it is not a reference: see grants
+	}
 	b.walk(n, spec, []string{"spec"})
 }
 
@@ -380,6 +386,11 @@ func (b *builder) walk(n *Node, v any, path []string) {
 			for _, target := range b.resolve(r, n) {
 				b.edge(Edge{From: n.ID, To: target.ID, Type: typ, Section: section, Path: strings.Join(path, ".")})
 			}
+			// A backendRef carries its own filters, which refer to objects too
+			// (ExtensionRef, RequestMirror, ExternalAuth).
+			if f, ok := t["filters"]; ok && typ == "backend" {
+				b.walk(n, f, append(path, "filters"))
+			}
 			return
 		}
 		keys := make([]string, 0, len(t))
@@ -448,6 +459,10 @@ func asRef(n *Node, m map[string]any, path []string) (ref, string, bool) {
 		if kind == "" {
 			kind = "Service"
 		}
+	case "extensionRef": // the same, in the v1alpha2 InferencePool
+		if kind == "" && n.Kind == "InferencePool" {
+			kind = "Service"
+		}
 	}
 	if kind == "" {
 		// secretRef -> Secret, authConfigRef -> AuthConfig
@@ -501,6 +516,7 @@ var categories = map[string]string{
 	"delay": "resilience", "entHealthCheck": "resilience", "sessionAffinity": "resilience",
 	"compression": "resilience", "loadBalancer": "resilience", "healthCheck": "resilience",
 	"outlierDetection": "resilience", "circuitBreakers": "resilience",
+	"sessionPersistence": "resilience", "retryConstraint": "resilience", // XBackendTrafficPolicy
 
 	"auth": "identity", "tokenExchange": "identity", "entTokenExchange": "identity",
 	"entConnector": "identity", "entCrossAppAccess": "identity", "entElicitation": "identity",

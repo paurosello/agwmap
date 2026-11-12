@@ -17,7 +17,11 @@ First release.
   policies and upstream targets.
 - Listener sets, route delegation, routes attached to a Service (mesh), inference pools, and backends
   that are another gateway. A route is shown under the listeners that take it (section name, port,
-  protocol and `allowedRoutes`).
+  protocol, `allowedRoutes` and hostname).
+- Every Gateway API kind of v1.7.0, standard and experimental: TLS, TCP and UDP routes, ListenerSet
+  (flagged when the gateway's `allowedListeners` does not admit it), XBackend, XBackendTrafficPolicy,
+  XTelemetryPolicy and XMesh. Per rule: timeouts, retry, the filters of each backendRef and the objects
+  a filter refers to. Per listener: its own status conditions.
 - Objects a card refers to (auth configs, rate limit configs, WAF policies, budgets, models, external
   secrets, parameters) nested under it; uncaptured Secrets and Services shown as names.
 - Flags for what needs attention: failing status conditions, cross-namespace references without a

@@ -210,10 +210,13 @@ const serviceParents = r => outE(r.id).filter(e => e.type === "parent" && N.get(
 // the listener's own namespace. A namespace selector is not evaluated, because
 // namespaces are not captured: such a listener is shown with every route.
 const ROUTE_PROTOCOLS = {HTTPRoute: ["HTTP", "HTTPS"], GRPCRoute: ["HTTP", "HTTPS"], TLSRoute: ["TLS"], TCPRoute: ["TCP"], UDPRoute: ["UDP"]};
+// Two hostnames overlap when they are equal or one is a wildcard that covers the other.
+const hostsOverlap = (a, b) => a === b || (a.startsWith("*.") && b.endsWith(a.slice(1))) || (b.startsWith("*.") && a.endsWith(b.slice(1)));
 function accepts(le, owner, r, p) {
-  const l = le.l, allowed = l.allowedRoutes || {};
+  const l = le.l, allowed = l.allowedRoutes || {}, hosts = spec(r).hostnames || [];
   if (p.section && p.section !== l.name) return false;
   if (p.port && p.port !== l.port) return false;
+  if (l.hostname && hosts.length && !hosts.some(h => hostsOverlap(l.hostname, h))) return false;
   if ((allowed.kinds || []).length) { if (!allowed.kinds.some(k => k.kind === r.kind)) return false; }
   else if (ROUTE_PROTOCOLS[r.kind] && ["HTTP", "HTTPS", "TLS", "TCP", "UDP"].includes(l.protocol) && !ROUTE_PROTOCOLS[r.kind].includes(l.protocol)) return false;
   return ((allowed.namespaces || {}).from || "Same") !== "Same" || r.ns === owner.ns;
@@ -229,7 +232,7 @@ function ruleBackends(r) {
     const x = e.type === "backend" && /rules\.(\d+)\.backendRefs\.(\d+)$/.exec(e.path || "");
     if (!x) continue; // a backendRef inside a filter (mirror) is shown with the filter
     const ref = get(spec(r), `rules.${x[1]}.backendRefs.${x[2]}`);
-    push(m, +x[1], {b: N.get(e.to), weight: ref && ref.weight, e});
+    push(m, +x[1], {b: N.get(e.to), weight: ref && ref.weight, e, ref, at: `spec.rules.${x[1]}.backendRefs.${x[2]}`});
   }
   // objects that name the route as their parent (AgentgatewayModel)
   for (const e of inE(r.id)) {
@@ -257,13 +260,18 @@ function targetsOf(b) {
   for (const [k, v] of Object.entries(s.aws || {})) // agentCore: runtime ARN, region, account
     out.push({name: k, where: Object.entries(v || {}).filter(x => typeof x[1] !== "object").map(x => `${x[0]}=${x[1]}`).join(" · "), proto: "AWS"});
   if (b.kind === "InferencePool") {
-    const sel = Object.entries(get(s, "selector.matchLabels") || {}).map(x => x.join("=")).join(","), pick = s.endpointPickerRef || s.extensionRef;
+    // v1: selector.matchLabels, targetPorts, endpointPickerRef. v1alpha2: a flat selector, targetPortNumber, extensionRef.
+    const sel = Object.entries(get(s, "selector.matchLabels") || s.selector || {}).filter(x => typeof x[1] === "string").map(x => x.join("=")).join(","), pick = s.endpointPickerRef || s.extensionRef;
     out.push({name: "pods", where: `${sel || "all pods"} :${(s.targetPorts || []).map(p => p.number).join(",") || s.targetPortNumber || ""}`, proto: "selected by label"});
-    if (pick) out.push({name: "endpoint picker", where: `Service/${pick.name}${pick.port ? ":" + (pick.port.number || pick.port) : ""}`, proto: "chooses the pod per request"});
+    if (pick) out.push({name: "endpoint picker", where: `Service/${pick.name}${pick.port ? ":" + (pick.port.number || pick.port) : pick.portNumber ? ":" + pick.portNumber : ""}`, proto: "chooses the pod per request"});
   }
   for (const k of ["mcp", "entMcp"]) { // how the MCP backend behaves, beyond its targets
     const modes = Object.entries(s[k] || {}).filter(x => x[0] !== "targets").map(([key, v]) => `${key}=${typeof v === "object" ? Object.keys(v).join("+") || "on" : v}`);
     if (modes.length) out.push({name: "settings", where: modes.join(" · "), proto: k});
+  }
+  if (s.externalHostname || s.endpointSelector) { // XBackend (Gateway API, experimental)
+    const sel = Object.entries(get(s, "endpointSelector.matchLabels") || {}).map(x => x.join("=")).join(",");
+    out.push({name: s.type || "target", where: `${get(s, "externalHostname.hostname") || "pods " + sel}${s.port && s.port.number ? ":" + s.port.number : ""}`, proto: s.protocol || "backend"});
   }
   if (s.dynamicForwardProxy) out.push({name: "dynamic", where: "dynamic forward proxy", proto: "HTTP"});
   if (b.kind.endsWith("Model")) {
@@ -276,7 +284,7 @@ const matchText = m => {
   const p = m.path ? `${m.path.type || "PathPrefix"} ${m.path.value ?? "/"}` : "";
   const pairs = list => (list || []).map(x => `${x.name}${x.type === "RegularExpression" ? "~" : "="}${x.value}`).join(",");
   const h = pairs(m.headers), q = pairs(m.queryParams);
-  const method = m.method && typeof m.method === "object" ? `gRPC ${m.method.service || "*"}/${m.method.method || "*"}` : m.method;
+  const method = m.method && typeof m.method === "object" ? `gRPC${m.method.type === "RegularExpression" ? "~" : ""} ${m.method.service || "*"}/${m.method.method || "*"}` : m.method;
   return [method, p, h && `headers(${h})`, q && `query(${q})`].filter(Boolean).join(" ") || "any";
 };
 const hay = n => `${n.kind} ${n.ns} ${n.name} ${JSON.stringify((n.obj && n.obj.spec) || "")}`.toLowerCase();
@@ -346,10 +354,11 @@ const polCards = (list, none) => list.length ? list.map(({p, section}) => { cons
 // The objects a card refers to. Captured ones become nested cards (an AuthConfig, a
 // budget, a WAF policy, a model), the rest (Secrets, Services) a line of chips.
 const USES = new Set(["ref", "params", "class", "discovers", "backend"]);
-function uses(n, seen = new Set([n.id])) {
+// only: limits the references to some of the object's edges (those of one filter, or of one listener).
+function uses(n, seen = new Set([n.id]), only = null) {
   let chips = "", cards = "";
   for (const e of outE(n.id)) {
-    if (!USES.has(e.type) || (n.role === "route" && e.type === "backend" && /backendRefs/.test(e.path || ""))) continue;
+    if (!USES.has(e.type) || (only ? !only(e) : n.role === "route" && e.type === "backend" && /backendRefs/.test(e.path || ""))) continue;
     const o = N.get(e.to);
     if (seen.has(o.id)) continue;
     seen.add(o.id);
@@ -392,26 +401,32 @@ for (const r of routes) {
 entries.forEach(e => e.key = [e.r ? e.r.id : "", e.gw ? e.gw.id : e.svc ? e.svc.id : "", e.le ? (e.le.via ? e.le.via.id : "") + "#" + e.le.l.name : ""].join("|"));
 
 // the rules of a route: matches, filters, backends and what is attached to them
+// The filters of a rule or of one backendRef (at: their path in the route), each
+// with the objects it refers to: a mirror backend, an extension, an auth service.
+const filtersHtml = (r, list, at) => (list || []).map((f, fi) => { const {type, ...rest} = f, v = Object.values(rest)[0];
+  return `<div class="feat filter"><div class="fh"><span class="tag" style="--c:var(--transform)">Filter</span><b>${esc(type)}</b></div>${v && typeof v === "object" ? block(v) : ""}</div>`
+    + uses(r, new Set([r.id]), e => (e.path || "").startsWith(`${at}.${fi}.`)); }).join("");
 function rulesHtml(r, depth = 0) {
-  const s = spec(r), rb = ruleBackends(r);
+  const s = spec(r), rb = ruleBackends(r), l4 = ["TLSRoute", "TCPRoute", "UDPRoute"].includes(r.kind);
   let br = "";
   (s.rules || [{}]).forEach((ru, ri) => {
     const list = rb.get(ri) || [];
-    br += `<div class="branch"><h5>Rule ${ri + 1}${ru.name ? " · " + esc(ru.name) : ""} <span class="mut mono">${esc((ru.matches || [{}]).map(matchText).join(" | "))}</span></h5>`;
-    for (const f of ru.filters || []) { const {type, ...rest} = f, v = Object.values(rest)[0];
-      br += `<div class="feat filter"><div class="fh"><span class="tag" style="--c:var(--transform)">Filter</span><b>${esc(type)}</b></div>${v && typeof v === "object" ? block(v) : ""}</div>`; }
-    for (const {b, weight, e: edge} of list) {
-      const extra = (weight !== undefined && list.length > 1 ? `<span class="badge">weight ${esc(weight)}</span>` : "") + crossBadge(edge) + continues(b);
+    br += `<div class="branch"><h5>Rule ${ri + 1}${ru.name ? " · " + esc(ru.name) : ""} <span class="mut mono">${esc(l4 ? "all connections" : (ru.matches || [{}]).map(matchText).join(" | "))}</span></h5>`;
+    for (const k of ["timeouts", "retry", "sessionPersistence"]) if (ru[k] && typeof ru[k] === "object")
+      br += `<div class="feat"><div class="fh"><span class="tag" style="--c:var(--resilience)">Rule</span><b>${k}</b></div>${block(ru[k])}</div>`;
+    br += filtersHtml(r, ru.filters, `spec.rules.${ri}.filters`);
+    for (const {b, weight, e: edge, ref, at} of list) {
+      const extra = (ref && ref.port ? `<span class="badge">port ${esc(ref.port)}</span>` : "") + (weight !== undefined && list.length > 1 ? `<span class="badge">weight ${esc(weight)}</span>` : "") + crossBadge(edge) + continues(b);
       if (b.role === "route") { // delegation: the request goes on through the rules of another route
         br += card(b, kv([["hostnames", (spec(b).hostnames || []).join(", ")]]), `<span class="badge go">delegated route</span>${extra}`);
         br += `<div class="sub">${polCards(polsOn(b.id))}${depth < 4 ? rulesHtml(b, depth + 1) : ""}</div>`;
         continue;
       }
       br += card(b, backendBody(b), extra) + uses(b) + usedBy(b);
-      const ps = polsOn(b.id);
-      if (ps.length) br += `<div class="sub">${polCards(ps)}</div>`;
+      const ps = polsOn(b.id), bf = ref && ref.filters ? filtersHtml(r, ref.filters, at + ".filters") : "";
+      if (ps.length || bf) br += `<div class="sub">${bf}${polCards(ps)}</div>`;
     }
-    if (!list.length) br += `<div class="empty" style="margin:8px 0">No backend: the filters answer the request.</div>`;
+    if (!list.length) br += `<div class="empty" style="margin:8px 0">${(ru.filters || []).length ? "No backend: the filters answer the request." : "No backend in this rule."}</div>`;
     br += `</div>`;
   });
   return br;
@@ -439,17 +454,26 @@ function flowHtml(e) {
   let h = "", i = 1;
   if (e.gw) {
     const lkv = kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
-      ["tls", l.tls ? `${l.tls.mode || "Terminate"} · ${(l.tls.certificateRefs || []).map(c => c.name).join(", ")}` : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
+      ["tls", l.tls ? [l.tls.mode || "Terminate", (l.tls.certificateRefs || []).map(c => c.name).join(", ")].filter(Boolean).join(" · ") : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
+    // The listener's own status, and only the references of this listener (not the certificates of the others).
+    const owner = via || e.gw, lbad = ((get(owner.obj, "status.listeners") || []).find(x => x.name === l.name) || {conditions: []}).conditions.filter(c => c.status !== "True");
+    const lstatus = lbad.length ? `<span class="badge bad" title="${esc(lbad.map(c => `${c.type}: ${c.reason || ""} ${c.message || ""}`).join("\n"))}">✗ listener ${types(lbad)}</span>` : "";
+    const mine = o => { const li = o === owner ? (spec(o).listeners || []).indexOf(l) : -1;
+      return x => { const m = /^spec\.listeners\.(\d+)\./.exec(x.path || ""); return !m || +m[1] === li; }; };
+    const refs = o => uses(o, new Set([o.id]), mine(o));
+    // A Gateway API ListenerSet is only taken by a gateway whose allowedListeners admits its namespace (default: none).
+    const from = get(spec(e.gw), "allowedListeners.namespaces.from") || "None";
+    const refused = via && /^gateway\.networking\.(x-)?k8s\.io$/.test(via.group) && !(from === "All" || from === "Selector" || (from === "Same" && via.ns === e.gw.ns));
     h += stage(i++, "gateway", "Client connects to the listener",
-      card(e.gw, via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + uses(e.gw) +
-      (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>`) + uses(via)}</div>` : ""));
+      card(e.gw, via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv, via ? "" : lstatus) + refs(e.gw) +
+      (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>${refused ? `<span class="badge bad" title="spec.allowedListeners of the gateway is ${esc(from)}: it does not take listeners from this ListenerSet">not allowed by the gateway's allowedListeners</span>` : ""}${lstatus}`) + refs(via)}</div>` : ""));
     h += stage(i++, "policy", "Policies attached to the gateway", polCards(gwPols, "None at gateway level."));
   } else if (e.svc) {
     h += stage(i++, "gateway", "Traffic in the mesh addressed to the Service",
       card(e.svc, `<div class="kv"><span>note</span><span>The route applies to requests for this Service. Which waypoint or proxy handles them is set by labels on the Service or its namespace, which are not captured.</span></div>`, continues(e.svc)));
     h += stage(i++, "policy", "Policies attached to the Service", polCards(gwPols, "None on the Service."));
   }
-  h += stage(i++, "route", "Route matches the request", r ? card(r, kv([["hostnames", (spec(r).hostnames || []).join(", ")], ["rules", (spec(r).rules || []).length]]))
+  h += stage(i++, "route", r && ["TLSRoute", "TCPRoute", "UDPRoute"].includes(r.kind) ? "Route takes the connection" : "Route matches the request", r ? card(r, kv([["hostnames", (spec(r).hostnames || []).join(", ")], ["rules", (spec(r).rules || []).length]]))
     : `<div class="empty">No route is attached to this listener.</div>`);
   if (r) {
     h += stage(i++, "policy", "Policies attached to the route", polCards(polsOn(r.id), "None at route level."));
@@ -507,6 +531,8 @@ function viewOutside(root) {
     : n.role === "params" ? "no gateway or class uses it"
     : n.role === "class" ? "no gateway uses it"
     : /RBAC|RoleBinding/.test(n.kind) ? "access to the management UI, not to traffic"
+    : n.kind === "ReferenceGrant" ? "allows no reference that was captured"
+    : n.kind.endsWith("Mesh") ? "mesh-wide settings, not on a request path"
     : !inE(n.id).length ? "nothing refers to it" : "used only by objects outside the flow";
   root.innerHTML = `<p class="mut">Objects that no request flow reaches: unused or dangling configuration, and settings that are not about traffic. Everything captured is either in a flow or listed here.</p><div class="flow" id="outside"></div>`;
   const box = root.querySelector("#outside");

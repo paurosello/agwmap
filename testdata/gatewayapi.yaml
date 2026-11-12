@@ -1,0 +1,135 @@
+# The Gateway API kinds that the other files do not use: a ListenerSet, the TLS,
+# TCP and UDP routes, and the experimental X kinds.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: edge, namespace: l4}
+spec:
+  gatewayClassName: gwdemo
+  allowedListeners: {namespaces: {from: Same}}
+  listeners:
+  - {name: http, protocol: HTTP, port: 80, hostname: "*.shop.test"}
+  - {name: tls, protocol: TLS, port: 8443, hostname: "*.db.test", tls: {mode: Passthrough}}
+  - {name: tcp, protocol: TCP, port: 9000}
+  - {name: udp, protocol: UDP, port: 5353}
+status:
+  listeners:
+  - name: udp
+    conditions:
+    - {type: Programmed, status: "False", reason: Invalid, message: UDP is not supported}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: {name: extra, namespace: l4}
+spec:
+  parentRef: {name: edge}
+  listeners:
+  - {name: admin, protocol: HTTP, port: 8080}
+---
+# A listener set in another namespace, which allowedListeners (Same) does not admit.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: {name: stranger, namespace: l4-other}
+spec:
+  parentRef: {name: edge, namespace: l4}
+  listeners:
+  - {name: side, protocol: HTTP, port: 8081}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: admin, namespace: l4}
+spec:
+  parentRefs: [{kind: ListenerSet, name: extra, sectionName: admin}]
+  rules:
+  - name: console
+    timeouts: {request: 10s}
+    retry: {attempts: 2}
+    filters:
+    - type: RequestMirror
+      requestMirror: {backendRef: {name: shadow, namespace: l4-other, port: 8080}}
+    backendRefs:
+    - name: console
+      port: 8080
+      filters:
+      - type: ExtensionRef
+        extensionRef: {group: gateway.networking.x-k8s.io, kind: XBackend, name: partner}
+    - {group: gateway.networking.x-k8s.io, kind: XBackend, name: partner}
+---
+# Its hostname is not under the http listener's: the route names the gateway but no listener takes it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: elsewhere, namespace: l4}
+spec:
+  parentRefs: [{name: edge}]
+  hostnames: [www.blog.test]
+  rules:
+  - backendRefs: [{name: blog, port: 8080}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata: {name: postgres, namespace: l4}
+spec:
+  parentRefs: [{name: edge, sectionName: tls}]
+  hostnames: [pg.db.test]
+  rules:
+  - backendRefs: [{name: postgres, namespace: l4-other, port: 5432}]
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: {name: tls-to-postgres, namespace: l4-other}
+spec:
+  from: [{group: gateway.networking.k8s.io, kind: TLSRoute, namespace: l4}]
+  to: [{group: "", kind: Service, name: postgres}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata: {name: queue, namespace: l4}
+spec:
+  parentRefs: [{name: edge, port: 9000}]
+  rules:
+  - backendRefs:
+    - {name: queue-a, port: 5672, weight: 80}
+    - {name: queue-b, namespace: l4-other, port: 5672, weight: 20}
+status:
+  parents:
+  - parentRef: {name: edge}
+    conditions:
+    - {type: ResolvedRefs, status: "False", reason: RefNotPermitted, message: no ReferenceGrant}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: UDPRoute
+metadata: {name: dns, namespace: l4}
+spec:
+  parentRefs: [{name: edge, sectionName: udp}]
+  rules:
+  - backendRefs: [{name: dns, port: 53}]
+---
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XBackend
+metadata: {name: partner, namespace: l4}
+spec:
+  type: ExternalHostname
+  externalHostname: {hostname: api.partner.test}
+  port: {number: 443}
+  protocol: HTTPS
+  tls: {mode: Simple, clientCertificateRef: {name: partner-client}}
+---
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XBackendTrafficPolicy
+metadata: {name: queue-retries, namespace: l4}
+spec:
+  targetRefs: [{group: "", kind: Service, name: queue-a}]
+  retryConstraint: {budget: {percent: 20}}
+  sessionPersistence: {type: Cookie}
+---
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XTelemetryPolicy
+metadata: {name: edge-tracing, namespace: l4}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: edge}]
+  tracing: {samplingRate: 100}
+---
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XMesh
+metadata: {name: l4-mesh}
+spec:
+  controllerName: example.com/mesh

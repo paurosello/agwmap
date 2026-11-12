@@ -68,7 +68,7 @@ type resource struct {
 }
 
 // forbidden is a resource that the server lists in discovery and refuses to list.
-const forbidden = "tcproutes"
+const forbidden = "xforbiddens"
 
 func plural(kind string) string {
 	k := strings.ToLower(kind)
@@ -125,7 +125,7 @@ func newCluster(t *testing.T) *cluster {
 		}
 	}
 	gw := groups["gateway.networking.k8s.io"]
-	gw["v1"][forbidden] = &resource{kind: "TCPRoute", namespaced: true}
+	gw["v1"][forbidden] = &resource{kind: "XForbidden", namespaced: true}
 	// Like a real server, serve the v1 resources under the older version too.
 	// ReferenceGrant stays in v1beta1 only, where the preferred version (v1)
 	// does not have it.
@@ -420,6 +420,43 @@ func TestGraph(t *testing.T) {
 	if e, ok := edge(gwapi+"/HTTPRoute/gwdemo-mcp/mcp", "/Service/gwdemo-apps/status", "backend"); ok && (!e.CrossNS || e.Grant == "") {
 		t.Errorf("mcp -> status: %+v, want cross-namespace with a grant", e)
 	}
+	// The other Gateway API kinds: a ListenerSet and a route attached to it, the
+	// TLS, TCP and UDP routes, and the experimental kinds.
+	const gwx = "gateway.networking.x-k8s.io"
+	edge(gwapi+"/ListenerSet/l4/extra", gwapi+"/Gateway/l4/edge", "parent")
+	if e, ok := edge(gwapi+"/HTTPRoute/l4/admin", gwapi+"/ListenerSet/l4/extra", "parent"); ok && e.Section != "admin" {
+		t.Errorf("admin -> listener set: %+v, want section admin", e)
+	}
+	if e, ok := edge(gwapi+"/TLSRoute/l4/postgres", "/Service/l4-other/postgres", "backend"); ok && (!e.CrossNS || e.Grant == "") {
+		t.Errorf("postgres: %+v, want cross-namespace with a grant", e)
+	}
+	if e, ok := edge(gwapi+"/TCPRoute/l4/queue", "/Service/l4-other/queue-b", "backend"); ok && (!e.CrossNS || e.Grant != "") {
+		t.Errorf("queue -> queue-b: %+v, want cross-namespace without a grant", e)
+	}
+	edge(gwapi+"/TCPRoute/l4/queue", gwapi+"/Gateway/l4/edge", "parent")
+	edge(gwapi+"/UDPRoute/l4/dns", "/Service/l4/dns", "backend")
+	edge(gwapi+"/HTTPRoute/l4/admin", gwx+"/XBackend/l4/partner", "backend")
+	// References inside filters: of a rule (a mirror), and of one backendRef.
+	if e, ok := edge(gwapi+"/HTTPRoute/l4/admin", "/Service/l4-other/shadow", "backend"); ok && !e.CrossNS {
+		t.Errorf("the mirror backend is not marked cross-namespace: %+v", e)
+	}
+	edge(gwapi+"/HTTPRoute/l4/admin", gwx+"/XBackend/l4/partner", "ref")
+	edge(gwx+"/XBackendTrafficPolicy/l4/queue-retries", "/Service/l4/queue-a", "target")
+	edge(gwx+"/XTelemetryPolicy/l4/edge-tracing", gwapi+"/Gateway/l4/edge", "target")
+	roles := map[string]string{}
+	for _, n := range g.Nodes {
+		roles[n.ID] = n.Role
+	}
+	for id, want := range map[string]string{
+		gwapi + "/ListenerSet/l4/extra": "listenerset", gwapi + "/TLSRoute/l4/postgres": "route",
+		gwapi + "/TCPRoute/l4/queue": "route", gwapi + "/UDPRoute/l4/dns": "route",
+		gwx + "/XBackend/l4/partner": "backend", gwx + "/XBackendTrafficPolicy/l4/queue-retries": "policy",
+		gwx + "/XTelemetryPolicy/l4/edge-tracing": "policy",
+	} {
+		if roles[id] != want {
+			t.Errorf("%s has role %q, want %q", id, roles[id], want)
+		}
+	}
 	// A policy that selects its target by label, where the label value is a hostname.
 	edge(agw+"/AgentgatewayPolicy/leak-test/leaks", gwapi+"/Gateway/leak-test/leaks", "target")
 	// A reference to something that was not captured becomes a stub.
@@ -492,7 +529,7 @@ func TestNamespace(t *testing.T) {
 	}
 	// The four objects of leaks.yaml, and what is cluster-scoped.
 	want := map[string]int{"Gateway": 1, "HTTPRoute": 1, "GRPCRoute": 1, "AgentgatewayPolicy": 1,
-		"GatewayClass": 1, "EnterpriseAgentgatewayRoleBinding": 1}
+		"GatewayClass": 1, "EnterpriseAgentgatewayRoleBinding": 1, "XMesh": 1}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Errorf("kinds = %v, want %v", kinds, want)
 	}
