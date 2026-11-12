@@ -83,14 +83,18 @@ The `feat`, `fix` and `perf` commits since the last release decide the version a
 
 Merging that pull request is the release, so only the owner merges it. release-please then tags
 `vX.Y.Z` and publishes the GitHub release with that section as notes, and calls the `release`
-workflow. That workflow tests, builds the archives, attaches them to the release, and commits
-`plugins/agwmap.yaml` to `main` so that krew installs the new version.
+workflow. That workflow tests, builds the archives, attaches them to the release, and opens a pull
+request `chore: update the krew manifest to vX.Y.Z` from the `release/krew` branch with the new
+`plugins/agwmap.yaml`. krew installs the new version once the owner merges that pull request.
 
 - Never edit `plugins/agwmap.yaml`, `CHANGELOG.md` or `.release-please-manifest.json` by hand, and
   never push a release tag yourself. To change what a release says, change the release pull request
   or the commit messages, not the files.
-- The release pull request is opened with the workflow token, so `ci` does not run on it; it only
-  changes the changelog and the manifest, and `main` was green when it was last updated.
+- `main` is protected by a ruleset: no direct pushes, and a pull request merges only when `test`,
+  `e2e`, `secrets` and `conventional` pass on a branch that is up to date with `main`.
+- The release and krew pull requests are opened with the workflow token, so `ci` and `commits` do
+  not run on them and the owner merges them with the admin bypass; they only change the changelog,
+  the version manifest or the krew manifest, and `main` was green when they were opened.
 - A failed `release` job can be re-run from the Actions tab, or by pushing the same tag again; every
   step repeats safely.
 
