@@ -1,24 +1,26 @@
 #!/bin/bash
-# End-to-end check against a real API server: creates a kind cluster, installs
-# the Gateway API and agentgateway CRDs (no controller), applies
-# testdata/demo.yaml, runs agwmap against it and checks what comes out.
+# End-to-end check against a real API server: starts kube-apiserver and etcd
+# with kwokctl (no nodes, no containers), installs the Gateway API and
+# agentgateway CRDs (no controller), applies testdata/demo.yaml, runs agwmap
+# against it and checks what comes out.
 #
 #   scripts/e2e.sh
 #
-# Needs kind, kubectl, helm, jq, yq and go. The cluster is deleted at the end; set
-# KEEP_CLUSTER=1 to keep it.
+# Needs kwokctl, kubectl, helm, jq, yq and go. kwokctl downloads etcd and
+# kube-apiserver into ~/.kwok/cache the first time. The cluster is deleted at
+# the end; set KEEP_CLUSTER=1 to keep it.
 set -euo pipefail
 
 GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.6.3}"
 AGENTGATEWAY_VERSION="${AGENTGATEWAY_VERSION:-v1.7.0}"
 CLUSTER=agwmap-e2e
-CONTEXT="kind-${CLUSTER}"
+CONTEXT="kwok-${CLUSTER}"
 
 cd "$(dirname "$0")/.."
 work="$(mktemp -d)"
 cleanup() {
+  if [ -z "${KEEP_CLUSTER:-}" ]; then kwokctl delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true; fi
   rm -rf "$work"
-  if [ -z "${KEEP_CLUSTER:-}" ]; then kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT
 
@@ -30,8 +32,8 @@ check() {
 }
 
 go build -o "$work/kubectl-agwmap" .
-# A kubeconfig of its own: kind would otherwise switch, and on deletion unset,
-# the current context of the one in use.
+# A kubeconfig of its own: kwokctl would otherwise switch, and on deletion
+# unset, the current context of the one in use.
 export KUBECONFIG="$work/kubeconfig"
 agwmap() { "$work/kubectl-agwmap" --context "$CONTEXT" "$@"; }
 # snapshot <name> [flags]: writes the snapshot $work/<name>.yaml and, for the
@@ -43,7 +45,8 @@ snapshot() {
     jq '{meta: (map(select(.kind == "agwmap-snapshot"))[0].meta), objects: map(select(.apiVersion))}' > "$work/$name.json"
 }
 
-kind create cluster --name "$CLUSTER" --wait 120s
+# Only the API server: nothing here schedules or runs a pod.
+kwokctl create cluster --name "$CLUSTER" --runtime binary --components etcd,kube-apiserver --wait 120s
 kubectl --context "$CONTEXT" apply --server-side -f \
   "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml" >/dev/null
 helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds \

@@ -28,6 +28,27 @@ jobs:
       - name: Test
         run: go test ./...
 
+  # Builds the archives of every platform. Its own build cache: the one that
+  # setup-go shares with the other jobs only holds their linux/amd64 builds, and
+  # the release build (-trimpath) is cached apart from those anyway.
+  archives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: archives-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: archives-${{ runner.os }}-
+
       - name: Build the release archives
         run: scripts/release.sh v0.0.0
 
@@ -44,10 +65,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  # The same binary against a real API server: a kind cluster with the Gateway
-  # API and agentgateway CRDs and testdata/demo.yaml.
+  # The same binary against a real API server: kube-apiserver and etcd started
+  # by kwokctl, with the Gateway API and agentgateway CRDs and testdata/demo.yaml.
   e2e:
     runs-on: ubuntu-latest
+    env:
+      KWOK_VERSION: v0.8.0
     steps:
       - uses: actions/checkout@v7
 
@@ -55,5 +78,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: End to end on kind
+      # The etcd and kube-apiserver binaries that kwokctl downloads.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.kwok/cache
+          key: kwok-${{ runner.os }}-${{ env.KWOK_VERSION }}
+
+      - name: Install kwokctl
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/bin/kwokctl" \
+            "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwokctl-linux-amd64"
+          chmod +x "${RUNNER_TEMP}/bin/kwokctl"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+
+      - name: End to end
         run: scripts/e2e.sh
