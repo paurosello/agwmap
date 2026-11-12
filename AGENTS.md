@@ -95,8 +95,9 @@ request `chore: update the krew manifest to vX.Y.Z` from the `release/krew` bran
 - The release and krew pull requests are opened with the workflow token, so `ci` and `commits` do
   not run on them and the owner merges them with the admin bypass; they only change the changelog,
   the version manifest or the krew manifest, and `main` was green when they were opened.
-- A failed `release` job can be re-run from the Actions tab, or by pushing the same tag again; every
-  step repeats safely.
+- A failed `release` job can be re-run from the Actions tab; every step repeats safely. A re-run uses
+  the workflow as it was at the release commit; to run the current one for a tag, use "Run workflow"
+  on `release` with that tag.
 
 `scripts/release.sh v0.0.0` builds the same archives locally into `dist/` to check that they build;
 discard the `plugins/agwmap.yaml` it writes.
