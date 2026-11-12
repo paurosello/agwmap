@@ -6,23 +6,28 @@ level, which route matches, and where it ends up.
 
 ![The request flow of one route: listener, gateway policies, route, route policies, backends](docs/screenshot.png)
 
-## How it helps
+## What it is for
 
-- **Understand a setup you did not build.** Pick a route and read the path top to bottom: listener,
-  gateway policies, route, route policies, backends and their upstream targets. Authentication, rate
-  limits, guardrails, token exchange and the rest are labelled by what they do.
-- **Find what is wrong or unused.** Objects with a failing status condition are flagged, as are
-  cross-namespace references without a ReferenceGrant and settings configured at more than one level.
-  Everything that no request reaches (dangling policies, unused backends) is listed in its own tab.
-- **Share it without the identifying details.** By default hostnames, URLs, IP addresses, account and
-  client ids and inline credentials are replaced with stable pseudonyms, and only gateway labels and
-  annotations are kept. Object names and namespaces stay, because the map is unreadable without them:
-  see [what a capture keeps](#what-a-capture-keeps) before you send one. The Raw tab shows exactly what
-  a capture holds.
-- **Read-only.** agwmap discovers the gateway API groups and lists their objects, nothing else.
-  Secrets, ConfigMaps and Services are never read; they only appear as names that something refers to.
-- **Look at someone else's cluster without access to it.** They run agwmap, export a snapshot file and
-  send it; you render the same page from that file.
+The page is meant for a setup you did not build. Pick a route and read its path top to bottom:
+listener, gateway policies, route, route policies, backends and their upstream targets. Policies are
+labelled by what they do (authentication, rate limiting, guardrails, token exchange) and not only by
+their kind.
+
+It also points at what is wrong or unused. Objects with a failing status condition are flagged, as are
+cross-namespace references without a ReferenceGrant and settings configured at more than one level.
+Whatever no request reaches, such as a dangling policy or an unused backend, is listed in its own tab.
+
+The output is anonymized by default so that you can send it to someone. Hostnames, URLs, IP addresses,
+account and client ids and inline credentials are replaced with stable pseudonyms, and only gateway
+labels and annotations are kept. Object names and namespaces stay, because the map is unreadable
+without them, so read [what a capture keeps](#what-a-capture-keeps) before you send one. The Raw tab
+shows exactly what a capture holds.
+
+That works in the other direction too: to look at a cluster you have no access to, ask its owner to
+run agwmap and send you the snapshot file, then render the same page from it.
+
+agwmap is read-only. It discovers the gateway API groups and lists their objects. Secrets, ConfigMaps
+and Services are never read; they appear only as names that something refers to.
 
 It covers the Gateway API and agentgateway (open source and enterprise), including inference pools.
 kgateway objects are read too, but that path has not been tested yet.
@@ -57,7 +62,7 @@ kubectl agwmap -anonymize=false                 # keep the real values
 
 The binary works the same under any name, for example `agwmap -o a.html`.
 
-| Flag | |
+| Flag | What it does |
 |---|---|
 | `--context`, `--kubeconfig` | Which cluster to read. Default: the current context. |
 | `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
