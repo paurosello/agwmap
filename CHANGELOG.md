@@ -4,6 +4,17 @@ All notable changes to agwmap are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). From 0.1.0 on, each section is written by release-please
 from the [Conventional Commits](https://www.conventionalcommits.org/) merged into the release.
 
+## [0.2.0](https://github.com/paurosello/agwmap/compare/v0.1.0...v0.2.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* open the map in the browser and write it to the temp folder by default
+
+### Features
+
+* open the map in the browser and write it to the temp folder by default ([98617ae](https://github.com/paurosello/agwmap/commit/98617ae00aa37f9befc1482866ec448fffd351c8))
+
 ## [0.1.0] - 2026-11-12
 
 First release.
