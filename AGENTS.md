@@ -32,7 +32,7 @@ change.
 gofmt -l .         # must print nothing
 go vet ./...
 go test ./...      # builds the binary and runs it against a fake API server that serves testdata/
-scripts/e2e.sh     # the same against a kind cluster (needs kind, kubectl, helm, jq, yq); deletes the cluster after
+scripts/e2e.sh     # the same against a real kube-apiserver started by kwokctl (needs kwokctl, kubectl, helm, jq, yq); deletes it after
 ```
 
 Run the first three before every commit. Run `scripts/e2e.sh` when the change touches what is read

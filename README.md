@@ -190,7 +190,7 @@ With `-anonymize=false` nothing is replaced and all labels and annotations are k
 
 ```sh
 go test ./...      # builds the binary and runs it against a fake API server that serves testdata/
-scripts/e2e.sh     # the same against a kind cluster with testdata/demo.yaml (needs kind, helm, jq, yq)
+scripts/e2e.sh     # the same against a real kube-apiserver with testdata/demo.yaml (needs kwokctl, helm, jq, yq)
 ```
 
 ## Keeping up with the CRDs
