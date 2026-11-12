@@ -160,7 +160,7 @@ check() {
 ## What to do
 
 1. Run `scripts/crds.sh diff <crd-name>` (or `scripts/crds.sh diff` for all of them) to see the structural change. It needs curl, jq, yq and helm, and prints to stdout: do not commit its output or paste it here.
-2. Check whether the change affects agwmap: a new kind to draw, or a field the map reads that was renamed or removed. Look at `graph.go` (the drawing rules per kind), the "Supported resources" tables in `README.md`, `testdata/` and `examples/`, and change what needs changing.
+2. Check whether the change affects agwmap: a new kind to draw, or a field the map reads that was renamed or removed. Look at `graph.go` (the drawing rules per kind), the "Supported resources" tables in `README.md`, and `testdata/`, and change what needs changing.
 3. Run `scripts/crds.sh update` and commit `crds.lock.json` together with the fix, or on its own when nothing needs fixing.
 EOF
     fi

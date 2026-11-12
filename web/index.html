@@ -295,17 +295,21 @@ const conditions = n => {
 };
 const failing = n => conditions(n).filter(c => c.status !== "True"), types = cs => esc(cs.map(c => c.type).join(", "));
 
+// A value as YAML, in HTML. Strings are quoted whenever a YAML parser could take
+// them for something else: the export is this text, and agwmap reads it back.
 function yaml(v, ind) {
   const pad = "  ".repeat(ind);
-  const scalar = x => typeof x === "string" ? (x === "" || /^[\s\d-]|[:#{}\[\],&*!|>'"%@`\n]|^(true|false|null|yes|no)$/i.test(x) ? JSON.stringify(x) : x) : String(x);
+  const scalar = x => typeof x === "string" ? (x === "" || /^[\s\d.~?=<+-]|[:#{}\[\],&*!|>'"%@`\x00-\x1f]|\s$|^(y|n|yes|no|on|off|true|false|null)$/i.test(x) ? JSON.stringify(x) : x) : String(x);
   if (Array.isArray(v)) return v.length ? v.map(x => x !== null && typeof x === "object" && Object.keys(x).length
-    ? pad + "- " + yaml(x, ind + 1).replace(/^\s+/, "") : pad + "- " + esc(scalar(Array.isArray(x) ? "[]" : x && typeof x === "object" ? "{}" : x))).join("\n") : pad + "[]";
+    ? pad + "- " + yaml(x, ind + 1).replace(/^\s+/, "") : pad + "- " + (Array.isArray(x) ? "[]" : x && typeof x === "object" ? "{}" : esc(scalar(x)))).join("\n") : pad + "[]";
   return Object.entries(v).map(([k, x]) => {
-    const key = `${pad}<span class="y">${esc(k)}</span>:`;
+    const key = `${pad}<span class="y">${esc(scalar(k))}</span>:`;
     if (x !== null && typeof x === "object") return Object.keys(x).length ? `${key}\n${yaml(x, ind + (Array.isArray(x) ? 0 : 1))}` : `${key} ${Array.isArray(x) ? "[]" : "{}"}`;
     return `${key} ${esc(scalar(x))}`;
   }).join("\n");
 }
+// yaml() returns HTML; this is its plain text
+const yamlText = v => { const tmp = document.createElement("div"); tmp.innerHTML = yaml(v, 0); return tmp.textContent; };
 
 /* ---------- cards, shared by the flow and the "outside the flow" tab ---------- */
 // Every object drawn in a flow is recorded here; the rest is listed in the other tab.
@@ -579,13 +583,12 @@ function viewResources(root) {
 /* ---------- raw ---------- */
 // every captured object as one multi-document YAML text
 function viewRaw(root) {
-  const objs = D.nodes.filter(n => n.obj), tmp = document.createElement("div");
-  const text = n => { tmp.innerHTML = yaml(n.obj, 0); return tmp.textContent; }; // yaml() returns HTML; this is its plain text
+  const objs = D.nodes.filter(n => n.obj);
   root.innerHTML = `<div class="rawbar"><span class="mut" id="rawcount"></span><button class="btn" id="rawcopy">Copy</button></div><pre id="rawtext"></pre>`;
   const pre = root.querySelector("#rawtext"), count = root.querySelector("#rawcount");
   const paint = q => {
     const list = objs.filter(n => !q || hay(n).includes(q));
-    pre.textContent = list.map(n => `---\n${text(n)}\n`).join("");
+    pre.textContent = list.map(n => `---\n${yamlText(n.obj)}\n`).join("");
     count.textContent = `${list.length} of ${objs.length} objects${D.meta.anonymized ? ", anonymized" : ", real values"}`;
   };
   root.querySelector("#rawcopy").addEventListener("click", () => navigator.clipboard.writeText(pre.textContent));
@@ -640,10 +643,12 @@ $("tabs").addEventListener("click", e => { if (e.target.dataset.v) location.hash
 window.addEventListener("hashchange", render);
 qEl.addEventListener("input", () => applyFilter(curQ()));
 $("export").addEventListener("click", () => {
-  const snap = {kind: "agwmap-snapshot", meta: D.meta, objects: D.nodes.filter(n => n.obj).map(n => n.obj)};
+  // The file that -o FILE.yaml writes: the meta, then one document per object.
+  const docs = [{kind: "agwmap-snapshot", meta: D.meta}, ...D.nodes.filter(n => n.obj).map(n => n.obj)];
+  const text = "# agwmap snapshot. Render it with: kubectl agwmap -from FILE\n" + docs.map(d => yamlText(d) + "\n").join("---\n");
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 1)], {type: "application/json"}));
-  a.download = `agwmap-snapshot-${D.meta.generatedAt.replace(/[:]/g, "").slice(0, 15)}.json`;
+  a.href = URL.createObjectURL(new Blob([text], {type: "application/yaml"}));
+  a.download = `agwmap-snapshot-${D.meta.generatedAt.replace(/[:]/g, "").slice(0, 15)}.yaml`;
   a.click();
   URL.revokeObjectURL(a.href);
 });

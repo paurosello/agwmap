@@ -35,7 +35,7 @@ spec:
 
       kubectl agwmap                       # current context -> agwmap.html
       kubectl agwmap -n team-a -o a.html
-      kubectl agwmap -from snapshot.json
+      kubectl agwmap -from snapshot.yaml
   platforms:
 EOF
   for p in $PLATFORMS; do

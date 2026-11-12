@@ -2,12 +2,13 @@
 # route to plain Services (one of them in another namespace, allowed by a
 # ReferenceGrant), a route to an LLM backend, and two policies.
 #
-#   kubectl apply -f examples/demo.yaml
-#   kubectl agwmap -n agwmap-demo
+#   kubectl agwmap -from testdata/demo.yaml
 #
-# It needs the Gateway API and agentgateway CRDs, but no controller: agwmap
-# reads the objects, it does not need them to be programmed. scripts/e2e.sh
-# applies this file to a kind cluster and checks what agwmap captures.
+# That reads this file; no cluster is needed. The file can also be applied to a
+# cluster that has the Gateway API and agentgateway CRDs (no controller: agwmap
+# reads the objects, it does not need them to be programmed), which is what
+# scripts/e2e.sh does before it checks what agwmap captures. The tests serve it
+# from their fake API server together with the other files in this directory.
 apiVersion: v1
 kind: Namespace
 metadata: {name: agwmap-demo}

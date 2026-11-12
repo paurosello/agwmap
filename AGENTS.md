@@ -11,7 +11,7 @@ capture, and `web/index.html` is the page. The README describes the behaviour; k
 gofmt -l .         # must print nothing
 go vet ./...
 go test ./...      # builds the binary and runs it against a fake API server that serves testdata/
-scripts/e2e.sh     # the same against a kind cluster (needs kind, kubectl, helm, jq); deletes the cluster after
+scripts/e2e.sh     # the same against a kind cluster (needs kind, kubectl, helm, jq, yq); deletes the cluster after
 ```
 
 Run the first three before every commit. Run `scripts/e2e.sh` when the change touches what is read
@@ -23,7 +23,7 @@ from the cluster.
   requests: names, kinds, versions and fingerprints only. Test fixtures and examples are written by
   hand, not copied from a chart or a cluster.
 - Captures can hold real cluster data. Never commit a page or snapshot that agwmap wrote; fixtures in
-  `testdata/` and `examples/` use invented names.
+  `testdata/` use invented names.
 - Commit locally on the current branch. Do not push, tag, open pull requests or publish a release
   unless the owner asked for it.
 

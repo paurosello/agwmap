@@ -4,22 +4,25 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"slices"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/yaml"
 )
 
 //go:embed web/index.html
@@ -32,10 +35,18 @@ const (
 
 // Snapshot is the captured objects, without anything derived from them. It is
 // what the page exports and what -from renders again.
+//
+// As a file it is a multi-document YAML manifest: one document of kind
+// agwmap-snapshot that holds Meta, then one document per object.
 type Snapshot struct {
-	Kind    string           `json:"kind"`
-	Meta    Meta             `json:"meta"`
-	Objects []map[string]any `json:"objects"`
+	Meta    Meta
+	Objects []map[string]any
+}
+
+// snapshotHead is the first document of a snapshot file.
+type snapshotHead struct {
+	Kind string `json:"kind"`
+	Meta Meta   `json:"meta"`
 }
 
 type options struct {
@@ -61,8 +72,8 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "same as -n")
 	flag.BoolVar(&allNamespaces, "A", false, "read all namespaces (the default; accepted for kubectl parity)")
 	flag.BoolVar(&allNamespaces, "all-namespaces", false, "same as -A")
-	flag.StringVar(&o.from, "from", "", "render a snapshot file exported earlier instead of reading a cluster")
-	flag.StringVar(&o.out, "o", "agwmap.html", "output file, or - for stdout; a .json name writes a snapshot instead of the page")
+	flag.StringVar(&o.from, "from", "", "render a YAML file instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
+	flag.StringVar(&o.out, "o", "agwmap.html", "output file, or - for stdout; a .yaml name writes a snapshot instead of the page")
 	flag.BoolVar(&o.anonymize, "anonymize", true, "replace hostnames, URLs, addresses, account ids and inline credentials with pseudonyms, and keep only gateway labels and annotations (object names and namespaces are kept); -anonymize=false keeps the real values")
 	flag.BoolVar(&showVersion, "version", false, "print the version and exit")
 	flag.Usage = func() {
@@ -80,7 +91,7 @@ func main() {
 	if flag.NArg() > 0 {
 		// The flag package stops at the first argument that is not a flag, so
 		// everything after it would be ignored without a word.
-		fmt.Fprintf(os.Stderr, "%s: unexpected argument %q (to render a snapshot, use -from %s)\n\n", name, flag.Arg(0), flag.Arg(0))
+		fmt.Fprintf(os.Stderr, "%s: unexpected argument %q (to render a file, use -from %s)\n\n", name, flag.Arg(0), flag.Arg(0))
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -121,8 +132,8 @@ func run(o options) error {
 	for i, obj := range snap.Objects {
 		objs[i] = unstructured.Unstructured{Object: obj}
 	}
-	// Also for a snapshot that was captured with the real values: what leaves
-	// this program is anonymized unless -anonymize=false says otherwise.
+	// Also for a manifest, or a snapshot that was captured with the real values:
+	// what leaves this program is anonymized unless -anonymize=false says otherwise.
 	if o.anonymize && !snap.Meta.Anonymized {
 		minimize(objs, true)
 		a := anonymize(objs) // sorts objs
@@ -137,8 +148,8 @@ func run(o options) error {
 	}
 
 	var data []byte
-	if strings.HasSuffix(o.out, ".json") {
-		data, err = json.MarshalIndent(snap, "", " ")
+	if strings.HasSuffix(o.out, ".yaml") || strings.HasSuffix(o.out, ".yml") {
+		data, err = snap.yaml()
 	} else {
 		g := buildGraph(objs)
 		g.Meta = snap.Meta
@@ -166,20 +177,84 @@ func run(o options) error {
 	return nil
 }
 
-func readSnapshot(file string) (*Snapshot, error) {
-	raw, err := os.ReadFile(file)
+// yaml is the snapshot as a file.
+func (s *Snapshot) yaml() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteString("# agwmap snapshot. Render it with: kubectl agwmap -from FILE\n")
+	head, err := yaml.Marshal(snapshotHead{snapshotKind, s.Meta})
 	if err != nil {
 		return nil, err
 	}
-	var s Snapshot
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+	b.Write(head)
+	for _, obj := range s.Objects {
+		raw, err := yaml.Marshal(obj)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString("---\n")
+		b.Write(raw)
 	}
-	if s.Kind != snapshotKind {
-		return nil, fmt.Errorf("%s is not an agwmap snapshot", file)
+	return b.Bytes(), nil
+}
+
+// readSnapshot reads a multi-document YAML file: a snapshot that agwmap wrote,
+// or any manifest, such as what kubectl apply -f takes or the List that kubectl
+// get -o yaml prints. Like a capture, it keeps only the objects of the gateway
+// API groups, so a Secret or a ConfigMap in the file is never read further.
+func readSnapshot(file string) (*Snapshot, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
 	}
-	s.Objects = slices.DeleteFunc(s.Objects, func(o map[string]any) bool { return o == nil })
-	return &s, nil
+	defer f.Close()
+
+	// What a manifest does not say about itself; a snapshot's first document does.
+	s := &Snapshot{Meta: Meta{Context: filepath.Base(file), GeneratedAt: time.Now().UTC().Format(time.RFC3339)}}
+	isSnapshot := false
+	var objs []unstructured.Unstructured
+	docs := utilyaml.NewYAMLReader(bufio.NewReader(f))
+	for {
+		raw, err := docs.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		var doc map[string]any
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		items := []any{doc}
+		switch doc["kind"] {
+		case snapshotKind:
+			var head snapshotHead
+			if err := yaml.Unmarshal(raw, &head); err != nil {
+				return nil, fmt.Errorf("%s: %w", file, err)
+			}
+			s.Meta, isSnapshot = head.Meta, true
+			continue
+		case "List":
+			items, _ = doc["items"].([]any)
+		}
+		for _, item := range items {
+			obj, _ := item.(map[string]any)
+			apiVersion, _ := obj["apiVersion"].(string)
+			group, _, grouped := strings.Cut(apiVersion, "/")
+			if kind, _ := obj["kind"].(string); kind != "" && grouped && wantGroup(group) {
+				objs = append(objs, unstructured.Unstructured{Object: obj})
+			}
+		}
+	}
+	if !isSnapshot && len(objs) == 0 {
+		return nil, fmt.Errorf("%s holds no object of the gateway API groups", file)
+	}
+	// A manifest taken from a cluster carries what a capture drops.
+	minimize(objs, false)
+	for i := range objs {
+		s.Objects = append(s.Objects, objs[i].Object)
+	}
+	return s, nil
 }
 
 func capture(o options) (*Snapshot, error) {
@@ -214,7 +289,7 @@ func capture(o options) (*Snapshot, error) {
 	}
 	minimize(objs, false)
 
-	s := &Snapshot{Kind: snapshotKind, Meta: Meta{
+	s := &Snapshot{Meta: Meta{
 		Context:     name,
 		Namespace:   o.namespace,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),

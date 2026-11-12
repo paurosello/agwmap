@@ -92,7 +92,7 @@ func newCluster(t *testing.T) *cluster {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, doc := range regexp.MustCompile(`(?m)^---\s*$`).Split(string(raw), -1) {
+		for _, doc := range documents.Split(string(raw), -1) {
 			var o map[string]any
 			if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
 				t.Fatalf("%s: %v", f, err)
@@ -283,11 +283,30 @@ func graphOf(t *testing.T, page string) Graph {
 	return g
 }
 
+// documents splits a multi-document YAML text.
+var documents = regexp.MustCompile(`(?m)^---\s*$`)
+
+// snapshotOf reads a snapshot file: the document that holds the meta, then one
+// document per object.
 func snapshotOf(t *testing.T, raw string) Snapshot {
 	t.Helper()
 	var s Snapshot
-	if err := json.Unmarshal([]byte(raw), &s); err != nil {
-		t.Fatal(err)
+	for i, doc := range documents.Split(raw, -1) {
+		var o map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
+			t.Fatal(err)
+		}
+		if i > 0 {
+			s.Objects = append(s.Objects, o)
+			continue
+		}
+		if o["kind"] != "agwmap-snapshot" {
+			t.Fatalf("the first document is not the snapshot's: %v", o)
+		}
+		meta, _ := json.Marshal(o["meta"])
+		if err := json.Unmarshal(meta, &s.Meta); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return s
 }
@@ -305,7 +324,7 @@ func shape(g Graph) []string {
 	return out
 }
 
-// out runs agwmap with -o pointing at a new file with the given name (a .json
+// out runs agwmap with -o pointing at a new file with the given name (a .yaml
 // name makes it a snapshot) and returns what was written.
 func out(t *testing.T, kubeconfig, name string, args ...string) string {
 	t.Helper()
@@ -320,7 +339,7 @@ func out(t *testing.T, kubeconfig, name string, args ...string) string {
 
 func TestCaptureIsAnonymizedByDefault(t *testing.T) {
 	c := newCluster(t)
-	raw := out(t, c.kubeconfig, "snapshot.json")
+	raw := out(t, c.kubeconfig, "snapshot.yaml")
 	noLeaks(t, "the snapshot", raw)
 	noLeaks(t, "the page", out(t, c.kubeconfig, "map.html"))
 
@@ -345,7 +364,7 @@ func TestCaptureIsAnonymizedByDefault(t *testing.T) {
 		}
 	}
 	// What makes the output useful survives: names, and the shape of a URL.
-	for _, want := range []string{`"name": "llm-failover"`, `/realms/p-`, `/protocol/openid-connect/certs`, `.example`} {
+	for _, want := range []string{`name: llm-failover`, `/realms/p-`, `/protocol/openid-connect/certs`, `.example`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("the snapshot does not contain %q", want)
 		}
@@ -354,7 +373,7 @@ func TestCaptureIsAnonymizedByDefault(t *testing.T) {
 
 func TestCaptureReadsOnlyGatewayGroups(t *testing.T) {
 	c := newCluster(t)
-	out(t, c.kubeconfig, "snapshot.json")
+	out(t, c.kubeconfig, "snapshot.yaml")
 	for _, p := range c.requests {
 		if p != "/apis" && !wantGroup(strings.Split(p, "/")[2]) {
 			t.Errorf("agwmap requested %s", p)
@@ -364,10 +383,10 @@ func TestCaptureReadsOnlyGatewayGroups(t *testing.T) {
 
 func TestCaptureIsRepeatable(t *testing.T) {
 	c := newCluster(t)
-	stamp := regexp.MustCompile(`"generatedAt": "[^"]*"`)
-	first := stamp.ReplaceAllString(out(t, c.kubeconfig, "a.json"), "")
+	stamp := regexp.MustCompile(`generatedAt: .*`)
+	first := stamp.ReplaceAllString(out(t, c.kubeconfig, "a.yaml"), "")
 	for i := 0; i < 5; i++ {
-		if again := stamp.ReplaceAllString(out(t, c.kubeconfig, "b.json"), ""); again != first {
+		if again := stamp.ReplaceAllString(out(t, c.kubeconfig, "b.yaml"), ""); again != first {
 			t.Fatal("two captures of the same cluster differ")
 		}
 	}
@@ -375,15 +394,18 @@ func TestCaptureIsRepeatable(t *testing.T) {
 
 func TestAnonymizeFalseKeepsRealValues(t *testing.T) {
 	c := newCluster(t)
-	raw := out(t, c.kubeconfig, "raw.json", "-anonymize=false")
+	raw := out(t, c.kubeconfig, "raw.yaml", "-anonymize=false")
 	s := snapshotOf(t, raw)
 	if s.Meta.Anonymized || s.Meta.Context != "leak-corp-prod" {
 		t.Errorf("meta = %+v", s.Meta)
 	}
-	for _, want := range []string{"portal.leak-corp.com", "billing.leak-corp.com/cost-center", `User \"jane.doe@leak-corp.com\"`} {
+	for _, want := range []string{"portal.leak-corp.com", "billing.leak-corp.com/cost-center"} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("the snapshot does not contain %q", want)
 		}
+	}
+	if len(s.Meta.Warnings) != 1 || !strings.Contains(s.Meta.Warnings[0], `User "jane.doe@leak-corp.com"`) {
+		t.Errorf("warnings = %q", s.Meta.Warnings)
 	}
 }
 
@@ -489,8 +511,8 @@ func diff(want, got []string) string {
 func TestFromSnapshot(t *testing.T) {
 	c := newCluster(t)
 	page := out(t, c.kubeconfig, "map.html")
-	anon := write(t, "anon.json", out(t, c.kubeconfig, "anon.json"))
-	raw := write(t, "raw.json", out(t, c.kubeconfig, "raw.json", "-anonymize=false"))
+	anon := write(t, "anon.yaml", out(t, c.kubeconfig, "anon.yaml"))
+	raw := write(t, "raw.yaml", out(t, c.kubeconfig, "raw.yaml", "-anonymize=false"))
 	const none = "/nonexistent" // -from must not need a cluster
 
 	// A snapshot renders to the page a direct capture gives.
@@ -504,21 +526,78 @@ func TestFromSnapshot(t *testing.T) {
 	if !graphOf(t, fromRaw).Meta.Anonymized {
 		t.Error("the page from a raw snapshot is not marked anonymized")
 	}
-	noLeaks(t, "the snapshot from a raw snapshot", out(t, none, "again.json", "-from", raw))
+	noLeaks(t, "the snapshot from a raw snapshot", out(t, none, "again.yaml", "-from", raw))
 	// ... unless asked not to.
 	if kept := mustRun(t, none, "-from", raw, "-anonymize=false", "-o", "-"); !strings.Contains(kept, "portal.leak-corp.com") {
 		t.Error("-from with -anonymize=false lost the real values")
 	}
 	// Anonymizing later gives what anonymizing at capture time gives.
-	a, b := snapshotOf(t, out(t, none, "later.json", "-from", raw)), snapshotOf(t, out(t, c.kubeconfig, "now.json"))
+	a, b := snapshotOf(t, out(t, none, "later.yaml", "-from", raw)), snapshotOf(t, out(t, c.kubeconfig, "now.yaml"))
 	if !reflect.DeepEqual(a.Objects, b.Objects) {
 		t.Error("a raw snapshot anonymized by -from differs from an anonymized capture")
 	}
 }
 
+// -from also takes a manifest that agwmap did not write.
+func TestFromManifest(t *testing.T) {
+	const none = "/nonexistent" // no cluster is needed
+	demo, err := filepath.Abs("testdata/demo.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := mustRun(t, none, "-from", demo, "-o", "-")
+	if strings.Contains(page, "demo-company") {
+		t.Error("the page from a manifest is not anonymized")
+	}
+	g := graphOf(t, page)
+	if !g.Meta.Anonymized || g.Meta.GeneratedAt == "" {
+		t.Errorf("meta = %+v", g.Meta)
+	}
+	const gwapi = "gateway.networking.k8s.io"
+	found := map[string]bool{}
+	for _, e := range g.Edges {
+		found[e.From+" -> "+e.To+" "+e.Type] = e.Type != "backend" || !e.CrossNS || e.Grant != ""
+	}
+	for _, want := range []string{
+		gwapi + "/HTTPRoute/agwmap-demo/shop -> " + gwapi + "/Gateway/agwmap-demo/demo parent",
+		gwapi + "/HTTPRoute/agwmap-demo/shop -> /Service/agwmap-demo-reviews/reviews backend", // with its grant
+		gwapi + "/HTTPRoute/agwmap-demo/chat -> agentgateway.dev/AgentgatewayBackend/agwmap-demo/openai backend",
+	} {
+		if !found[want] {
+			t.Errorf("no edge %s", want)
+		}
+	}
+
+	// A List, as kubectl get -o yaml prints it, with what a server adds; and
+	// kinds outside the gateway API groups, which are left alone.
+	list := write(t, "list.yaml", `apiVersion: v1
+kind: List
+items:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: edge, namespace: listed, uid: 0f0f0f0f-0000-4000-8000-000000000000, resourceVersion: "7"}
+  spec: {gatewayClassName: agentgateway, listeners: [{name: http, port: 80, protocol: HTTP}]}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: token, namespace: listed}
+stringData: {token: sk-leak-from-a-manifest}
+`)
+	raw := out(t, none, "list.yaml", "-from", list, "-anonymize=false")
+	s := snapshotOf(t, raw)
+	if len(s.Objects) != 1 || s.Objects[0]["kind"] != "Gateway" || s.Meta.Context != "list.yaml" {
+		t.Errorf("from a List: meta %+v, objects %v", s.Meta, s.Objects)
+	}
+	for _, gone := range []string{"sk-leak-from-a-manifest", "uid", "resourceVersion"} {
+		if strings.Contains(raw, gone) {
+			t.Errorf("the snapshot of a manifest contains %q", gone)
+		}
+	}
+}
+
 func TestNamespace(t *testing.T) {
 	c := newCluster(t)
-	s := snapshotOf(t, out(t, c.kubeconfig, "ns.json", "-n", "leak-test"))
+	s := snapshotOf(t, out(t, c.kubeconfig, "ns.yaml", "-n", "leak-test"))
 	kinds := map[string]int{}
 	for _, o := range s.Objects {
 		md := o["metadata"].(map[string]any)
@@ -538,14 +617,14 @@ func TestNamespace(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	c := newCluster(t)
 	// A stray argument is an error, not a capture of the live cluster.
-	if _, stderr, code := agwmap(t, c.kubeconfig, "snapshot.json"); code != 2 || !strings.Contains(stderr, "-from snapshot.json") {
+	if _, stderr, code := agwmap(t, c.kubeconfig, "snapshot.yaml"); code != 2 || !strings.Contains(stderr, "-from snapshot.yaml") {
 		t.Errorf("stray argument: exit %d, stderr %q", code, stderr)
 	}
 	if len(c.requests) != 0 {
 		t.Errorf("a stray argument still reached the cluster: %v", c.requests)
 	}
-	notSnapshot := write(t, "x.json", `{"kind": "something else"}`)
-	if _, stderr, code := agwmap(t, c.kubeconfig, "-from", notSnapshot); code != 1 || !strings.Contains(stderr, "not an agwmap snapshot") {
+	nothing := write(t, "x.yaml", "apiVersion: v1\nkind: Secret\nmetadata: {name: x}\n")
+	if _, stderr, code := agwmap(t, c.kubeconfig, "-from", nothing); code != 1 || !strings.Contains(stderr, "no object of the gateway API groups") {
 		t.Errorf("wrong file: exit %d, stderr %q", code, stderr)
 	}
 	if _, stderr, code := agwmap(t, "/nonexistent", "-o", "-"); code != 1 || stderr == "" {

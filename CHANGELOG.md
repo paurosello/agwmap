@@ -31,13 +31,17 @@ First release.
 - Anonymization, on by default: hostnames, URLs, IP addresses, account and client ids and inline
   credentials become stable pseudonyms; metadata is reduced to name, namespace and gateway labels and
   annotations. Object names and namespaces are kept. `-anonymize=false` keeps the real values.
-- Snapshots: export the capture from the page or with `-o file.json`, render it again with `-from`.
+- Snapshots: export the capture from the page or with `-o file.yaml`, render it again with `-from`. A
+  snapshot is a multi-document YAML manifest with one extra document that describes the capture.
+- `-from` also renders any other YAML manifest of gateway objects, without a cluster: files written
+  for `kubectl apply -f`, `helm template` output, or the list from `kubectl get -o yaml`. Objects
+  outside the gateway API groups are skipped.
 - kubectl plugin: installed as `kubectl-agwmap` it runs as `kubectl agwmap`, with `-n`/`--namespace`,
   `-A`/`--all-namespaces`, `--context` and `--kubeconfig`. A krew manifest is published in `plugins/`
   with each release.
 - A line on stderr when a newer release exists, with the krew command to update. Nothing is printed
   when the check cannot reach GitHub or the output is not a terminal.
 - End-to-end tests, run on every push and pull request: the binary against a fake API server, and
-  against a kind cluster with `examples/demo.yaml`.
+  against a kind cluster with `testdata/demo.yaml`.
 
 [Unreleased]: https://github.com/paurosello/agwmap/commits/main

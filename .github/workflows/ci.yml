@@ -32,7 +32,7 @@ jobs:
         run: scripts/release.sh v0.0.0
 
   # The same binary against a real API server: a kind cluster with the Gateway
-  # API and agentgateway CRDs and examples/demo.yaml.
+  # API and agentgateway CRDs and testdata/demo.yaml.
   e2e:
     runs-on: ubuntu-latest
     steps:

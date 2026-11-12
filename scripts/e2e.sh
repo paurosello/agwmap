@@ -1,11 +1,11 @@
 #!/bin/bash
 # End-to-end check against a real API server: creates a kind cluster, installs
 # the Gateway API and agentgateway CRDs (no controller), applies
-# examples/demo.yaml, runs agwmap against it and checks what comes out.
+# testdata/demo.yaml, runs agwmap against it and checks what comes out.
 #
 #   scripts/e2e.sh
 #
-# Needs kind, kubectl, helm, jq and go. The cluster is deleted at the end; set
+# Needs kind, kubectl, helm, jq, yq and go. The cluster is deleted at the end; set
 # KEEP_CLUSTER=1 to keep it.
 set -euo pipefail
 
@@ -34,6 +34,14 @@ go build -o "$work/kubectl-agwmap" .
 # the current context of the one in use.
 export KUBECONFIG="$work/kubeconfig"
 agwmap() { "$work/kubectl-agwmap" --context "$CONTEXT" "$@"; }
+# snapshot <name> [flags]: writes the snapshot $work/<name>.yaml and, for the
+# checks, the same as $work/<name>.json: {meta, objects}.
+snapshot() {
+  local name="$1"; shift
+  agwmap "$@" -o "$work/$name.yaml"
+  yq ea -o=json '[.]' "$work/$name.yaml" |
+    jq '{meta: (map(select(.kind == "agwmap-snapshot"))[0].meta), objects: map(select(.apiVersion))}' > "$work/$name.json"
+}
 
 kind create cluster --name "$CLUSTER" --wait 120s
 kubectl --context "$CONTEXT" apply --server-side -f \
@@ -42,10 +50,10 @@ helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-
   --kube-context "$CONTEXT" --create-namespace --namespace agentgateway-system \
   --version "$AGENTGATEWAY_VERSION" >/dev/null
 kubectl --context "$CONTEXT" wait --for=condition=Established crd --all --timeout=60s >/dev/null
-kubectl --context "$CONTEXT" apply -f examples/demo.yaml >/dev/null
+kubectl --context "$CONTEXT" apply -f testdata/demo.yaml >/dev/null
 
 # The real values: every object of the example, each one once.
-agwmap -anonymize=false -o "$work/raw.json"
+snapshot raw -anonymize=false
 kinds='[.objects[] | select(.metadata.namespace // "" | startswith("agwmap-demo")) | .kind] | sort | join(",")'
 want="AgentgatewayBackend,AgentgatewayPolicy,AgentgatewayPolicy,Gateway,HTTPRoute,HTTPRoute,ReferenceGrant"
 check "captures every object of the example once" "$kinds == \"$want\"" "$work/raw.json"
@@ -55,25 +63,30 @@ check "drops server-side metadata" '[.objects[].metadata | keys[] | select(IN("n
 check "keeps the real hostnames" '[.objects[] | select(.kind == "Gateway") | .spec.listeners[].hostname] | index("*.demo-company.test") != null' "$work/raw.json"
 
 # The default: anonymized.
-agwmap -o "$work/anon.json"
+snapshot anon
 check "is anonymized by default" '.meta.anonymized and .meta.context == "cluster"' "$work/anon.json"
-if grep -q -e demo-company -e "$CONTEXT" "$work/anon.json"; then fail "the anonymized snapshot still holds a real value"; fi
+if grep -q -e demo-company -e "$CONTEXT" "$work/anon.yaml"; then fail "the anonymized snapshot still holds a real value"; fi
 echo "ok: the anonymized snapshot holds no hostname of the example"
 check "keeps names and namespaces" '[.objects[] | select(.kind == "HTTPRoute" and .metadata.namespace == "agwmap-demo") | .metadata.name] | sort == ["chat","shop"]' "$work/anon.json"
 
 # One namespace.
-agwmap -n agwmap-demo-reviews -anonymize=false -o "$work/ns.json"
+snapshot ns -n agwmap-demo-reviews -anonymize=false
 check "-n reads one namespace" '[.objects[] | select(.metadata.namespace) | .metadata.namespace] | unique == ["agwmap-demo-reviews"]' "$work/ns.json"
 
 # The page, straight from the cluster and from a snapshot: same graph.
 graph() { sed -n 's/.*<script id="data" type="application\/json">\(.*\)<\/script>.*/\1/p' "$1" | jq -S '{nodes: [.nodes[].id], edges: [.edges[] | del(.note)]}'; }
 agwmap -o "$work/map.html"
-agwmap -from "$work/anon.json" -o "$work/from.html"
+agwmap -from "$work/anon.yaml" -o "$work/from.html"
 graph "$work/map.html" > "$work/map.graph"
 graph "$work/from.html" > "$work/from.graph"
 [ -s "$work/map.graph" ] || fail "the page holds no graph"
 cmp -s "$work/map.graph" "$work/from.graph" || fail "the page from a snapshot differs from the page from the cluster"
 echo "ok: a snapshot renders to the same graph as the cluster"
+# The manifest that was applied, read as a file: what the cluster gave.
+agwmap -from testdata/demo.yaml -o "$work/manifest.html"
+graph "$work/manifest.html" > "$work/manifest.graph"
+cmp -s "$work/map.graph" "$work/manifest.graph" || fail "the page from the manifest differs from the page from the cluster"
+echo "ok: the manifest renders to the same graph as the cluster"
 check "the cross-namespace backend is found, with its grant" \
   '[.edges[] | select(.type == "backend" and .crossNs == true and (.grant // "" | contains("shop-to-reviews")))] | length == 1' \
   <(sed -n 's/.*<script id="data" type="application\/json">\(.*\)<\/script>.*/\1/p' "$work/map.html")

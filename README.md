@@ -56,8 +56,9 @@ go install github.com/paurosello/agwmap@latest
 ```sh
 kubectl agwmap                                  # current kube context -> agwmap.html, anonymized
 kubectl agwmap --context prod -n team-a -o a.html
-kubectl agwmap -o snapshot.json                 # capture only, to send to someone
-kubectl agwmap -from snapshot.json -o a.html    # render a capture you received
+kubectl agwmap -o snapshot.yaml                 # capture only, to send to someone
+kubectl agwmap -from snapshot.yaml -o a.html    # render a capture you received
+kubectl agwmap -from manifests.yaml             # render a manifest, without a cluster
 kubectl agwmap -anonymize=false                 # keep the real values
 ```
 
@@ -67,9 +68,9 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 |---|---|
 | `--context`, `--kubeconfig` | Which cluster to read. Default: the current context. |
 | `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
-| `-o` | Output file, `agwmap.html` by default; `-` writes the page to stdout. A name ending in `.json` writes a snapshot instead of the page. |
-| `-from` | Render a snapshot file instead of reading a cluster. |
-| `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a snapshot that was not. |
+| `-o` | Output file, `agwmap.html` by default; `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
+| `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. |
+| `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a manifest or a snapshot that was not. |
 | `-version` | Print the version. |
 
 When a newer release exists, a released build says so in one line on stderr after writing the map,
@@ -80,8 +81,17 @@ when stderr is not a terminal.
 agwmap needs permission to list the objects of the gateway API groups. A kind it may not list is left
 out and named in a warning at the top of the page.
 
-To try it without a gateway of your own, apply [`examples/demo.yaml`](examples/demo.yaml) to a cluster
-that has the Gateway API and agentgateway CRDs.
+A snapshot is a multi-document YAML manifest: one document of kind `agwmap-snapshot` that says where
+and when it was captured, whether it is anonymized and what could not be read, then one document per
+object. The page's "Export snapshot" button downloads the same file.
+
+`-from` reads any other manifest the same way: the files you would give to `kubectl apply -f`, the
+output of `helm template`, or the list that `kubectl get -o yaml` prints. It keeps the objects of the
+gateway API groups and skips everything else, so a Secret in the file is not read. Nothing checks a
+file the way an API server does: a misspelled field is not reported and defaults are not filled in.
+
+To try it without a gateway of your own, or without a cluster, render
+[`testdata/demo.yaml`](testdata/demo.yaml): `kubectl agwmap -from testdata/demo.yaml`.
 
 ## Supported resources
 
@@ -178,7 +188,7 @@ With `-anonymize=false` nothing is replaced and all labels and annotations are k
 
 ```sh
 go test ./...      # builds the binary and runs it against a fake API server that serves testdata/
-scripts/e2e.sh     # the same against a kind cluster with examples/demo.yaml (needs kind, helm, jq)
+scripts/e2e.sh     # the same against a kind cluster with testdata/demo.yaml (needs kind, helm, jq, yq)
 ```
 
 ## Keeping up with the CRDs

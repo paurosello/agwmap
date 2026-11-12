@@ -6,6 +6,8 @@ dist/
 # What agwmap writes: pages and snapshots can hold real cluster data
 out/
 /*.html
+/*.yaml
+/*.yml
 /*.json
 !/crds.lock.json
 !/renovate.json
