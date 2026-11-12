@@ -4,7 +4,7 @@ agwmap reads the gateway configuration of a Kubernetes cluster and turns it into
 HTML page that shows what happens to a request: which listener takes it, which policies apply at each
 level, which route matches, and where it ends up.
 
-![The request flow of one route: listener, gateway policies, route, route policies, backends](docs/screenshot.png)
+![The request flow of one route: a summary, then listener, gateway policies, route, route policies, backends](docs/screenshot.png)
 
 ## What it is for
 
