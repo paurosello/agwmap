@@ -28,7 +28,10 @@ import (
 //   - gRPC service names in route matches
 //   - label and annotation values, by the same rules
 //
-// In-cluster service hostnames are replaced too (svc-1.ns-1.svc.cluster.local).
+// In-cluster service hostnames are replaced too (svc-1.ns-1.svc.cluster.local),
+// unless they name what the capture names anyway: the proxy Service of a
+// captured Gateway, or a Service that an object refers to by name. Keeping
+// those lets the map follow a request that leaves the gateway and comes back.
 //
 // Kept: the names and namespaces of the objects themselves and the names of the
 // objects they refer to (Secrets, Services, models), which the map needs to
@@ -103,6 +106,44 @@ type anonymizer struct {
 	pseudo map[string]string // "kind\x00value" -> pseudonym
 	count  map[string]int
 	hosts  map[string]bool // hostnames replaced so far, to find them again in free text
+	named  map[string]bool // "name.namespace" of the Services the capture names: kept in hostnames
+}
+
+// namedServices collects the Services that the objects name: the proxy Service
+// of each Gateway, which has the Gateway's name, and every reference to a
+// Service (a backendRef without a kind, or any reference of kind Service).
+func namedServices(objs []unstructured.Unstructured) map[string]bool {
+	named := map[string]bool{}
+	var refs func(v any, key, ns string)
+	refs = func(v any, key, ns string) {
+		switch t := v.(type) {
+		case []any:
+			for _, c := range t {
+				refs(c, key, ns)
+			}
+		case map[string]any:
+			name, _ := t["name"].(string)
+			kind, hasKind := t["kind"].(string)
+			if name != "" && (kind == "Service" || !hasKind && (key == "backendRef" || key == "backendRefs")) {
+				refNS, _ := t["namespace"].(string)
+				if refNS == "" {
+					refNS = ns
+				}
+				named[name+"."+refNS] = true
+			}
+			for k, c := range t {
+				refs(c, k, ns)
+			}
+		}
+	}
+	for i := range objs {
+		u := &objs[i]
+		if u.GetKind() == "Gateway" {
+			named[u.GetName()+"."+u.GetNamespace()] = true
+		}
+		refs(u.Object["spec"], "spec", u.GetNamespace())
+	}
+	return named
 }
 
 func sortedKeys(m map[string]any) []string { return slices.Sorted(maps.Keys(m)) }
@@ -116,7 +157,7 @@ func anonymize(objs []unstructured.Unstructured) *anonymizer {
 		}
 		return key(&objs[i]) < key(&objs[j])
 	})
-	a := &anonymizer{pseudo: map[string]string{}, count: map[string]int{}, hosts: map[string]bool{}}
+	a := &anonymizer{pseudo: map[string]string{}, count: map[string]int{}, hosts: map[string]bool{}, named: namedServices(objs)}
 	// The second pass replaces hostnames that the first one only learned about
 	// later, or met in a place where nothing marks them as a host.
 	for _, visit := range []func(v any, key, parent string) any{a.walk, a.sweep} {
@@ -359,6 +400,9 @@ func (a *anonymizer) host(h string) string {
 		}
 	}
 	if m := clusterSvcRe.FindStringSubmatch(h); m != nil {
+		if a.named[m[1]+"."+m[2]] {
+			return h // the capture names this Service already
+		}
 		return a.name("svc", m[1]) + "." + a.name("ns", m[2]) + ".svc" + m[3]
 	}
 	a.hosts[h] = true

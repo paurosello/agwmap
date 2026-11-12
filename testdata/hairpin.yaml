@@ -1,0 +1,107 @@
+# One MCP server that federates several others, where some targets go back
+# through the same gateway (by its in-cluster hostname) to inner routes that
+# carry the per-server policies. The map must follow those targets to the inner
+# route, also in an anonymized capture: edge.hairpin.svc.cluster.local names
+# the proxy Service of the captured gateway, so it is kept, while the hostnames
+# of the MCP servers themselves are replaced.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: edge, namespace: hairpin}
+spec:
+  gatewayClassName: enterprise-agentgateway
+  listeners:
+  - {name: http, port: 80, protocol: HTTP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: tools, namespace: hairpin}
+spec:
+  parentRefs: [{name: edge}]
+  rules:
+  - matches: [{path: {type: Exact, value: /mcp}}]
+    backendRefs:
+    - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: tools}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: tools, namespace: hairpin}
+spec:
+  entMcp:
+    targets:
+    - name: search # straight to the server
+      static: {host: search.hairpin.svc.cluster.local, port: 8080, path: /mcp, protocol: StreamableHTTP}
+    - name: tickets # back through the gateway, to the route inner-tickets
+      static: {host: edge.hairpin.svc.cluster.local, port: 80, path: /inner/tickets/mcp, protocol: StreamableHTTP, policies: {auth: {passthrough: {}}}}
+    - name: repos # the same, to inner-repos
+      static: {host: edge.hairpin.svc.cluster.local, port: 80, path: /inner/repos/mcp, protocol: StreamableHTTP, policies: {auth: {passthrough: {}}}}
+    - name: wiki # the gateway has no listener on 8080
+      static: {host: edge.hairpin.svc.cluster.local, port: 8080, path: /inner/wiki/mcp, protocol: StreamableHTTP}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: search-connector, namespace: hairpin}
+spec:
+  targetRefs:
+  - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: tools, sectionName: search}
+  backend:
+    entConnector: {displayName: Search}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: inner-tickets, namespace: hairpin}
+spec:
+  parentRefs: [{name: edge}]
+  rules:
+  - matches: [{path: {type: Exact, value: /inner/tickets/mcp}}]
+    backendRefs:
+    - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: tickets}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: inner-repos, namespace: hairpin}
+spec:
+  parentRefs: [{name: edge}]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /inner/repos}}]
+    backendRefs:
+    - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: repos}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: tickets, namespace: hairpin}
+spec:
+  entMcp:
+    targets:
+    - name: tickets
+      static: {host: tickets.hairpin.svc.cluster.local, port: 8080, path: /mcp, protocol: StreamableHTTP}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: repos, namespace: hairpin}
+spec:
+  entMcp:
+    targets:
+    - name: repos
+      static: {host: repos.hairpin.svc.cluster.local, port: 8080, path: /mcp, protocol: StreamableHTTP}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: tickets-elicitation, namespace: hairpin}
+spec:
+  targetRefs:
+  - {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: tickets}
+  backend:
+    entTokenExchange: {solo: {elicitation: {}}}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: inner-jwt, namespace: hairpin}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: inner-tickets}
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: inner-repos}
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+      - {issuer: "https://login.hairpin-idp.example/v2.0", jwks: {remote: {jwksPath: /keys}}}

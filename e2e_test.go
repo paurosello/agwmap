@@ -48,7 +48,8 @@ var leaks = []string{
 	"leak-bearer", "leak-apikey", "sk-leak", "ghp_leak", "bGVhay11c2Vy", // inline credentials
 	"leak-query-secret", "LEAKCLUSTERID", "8f3c1e2a", "0a1b2c3d", // URL query and path, GUIDs
 	"123456789012", "2600:1f18", "203.0.113.77", // account id, addresses
-	"jane.doe", // the user named in a "forbidden" warning
+	"jane.doe",                                           // the user named in a "forbidden" warning
+	"search.hairpin", "tickets.hairpin", "repos.hairpin", // hairpin.yaml: Services that nothing names
 }
 
 // cluster is the fake API server.
@@ -363,8 +364,10 @@ func TestCaptureIsAnonymizedByDefault(t *testing.T) {
 			}
 		}
 	}
-	// What makes the output useful survives: names, and the shape of a URL.
-	for _, want := range []string{`name: llm-failover`, `/realms/p-`, `/protocol/openid-connect/certs`, `.example`} {
+	// What makes the output useful survives: names, the shape of a URL, and the
+	// hostname of a gateway's own proxy Service, which leads back into the gateway.
+	for _, want := range []string{`name: llm-failover`, `/realms/p-`, `/protocol/openid-connect/certs`, `.example`,
+		`host: edge.hairpin.svc.cluster.local`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("the snapshot does not contain %q", want)
 		}
