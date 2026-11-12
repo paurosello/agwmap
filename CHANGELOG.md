@@ -35,6 +35,8 @@ First release.
 - kubectl plugin: installed as `kubectl-agwmap` it runs as `kubectl agwmap`, with `-n`/`--namespace`,
   `-A`/`--all-namespaces`, `--context` and `--kubeconfig`. A krew manifest is published in `plugins/`
   with each release.
+- A line on stderr when a newer release exists, with the krew command to update. Nothing is printed
+  when the check cannot reach GitHub or the output is not a terminal.
 - End-to-end tests, run on every push and pull request: the binary against a fake API server, and
   against a kind cluster with `examples/demo.yaml`.
 

@@ -88,9 +88,21 @@ func main() {
 		o.namespace = ""
 	}
 
+	// Look for a newer release while the map is made. Only when someone is
+	// there to read the answer: not in a pipeline or a CI job.
+	notice := make(chan string, 1)
+	if st, err := os.Stderr.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
+		go func() { notice <- updateNotice(version) }()
+	} else {
+		notice <- ""
+	}
+
 	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "agwmap:", err)
 		os.Exit(1)
+	}
+	if n := <-notice; n != "" {
+		fmt.Fprintln(os.Stderr, n)
 	}
 }
 

@@ -72,6 +72,11 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 | `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a snapshot that was not. |
 | `-version` | Print the version. |
 
+When a newer release exists, a released build says so in one line on stderr after writing the map,
+with the command to update (`kubectl krew upgrade agwmap`). The check is one request to github.com
+that sends nothing about the cluster; without network access it is skipped silently, and it is not made
+when stderr is not a terminal.
+
 agwmap needs permission to list the objects of the gateway API groups. A kind it may not list is left
 out and named in a warning at the top of the page.
 
