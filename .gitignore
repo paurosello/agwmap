@@ -7,5 +7,7 @@ dist/
 out/
 /*.html
 /*.json
+!/crds.lock.json
+!/renovate.json
 
 .DS_Store
