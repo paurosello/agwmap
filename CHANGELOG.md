@@ -4,6 +4,13 @@ All notable changes to agwmap are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). From 0.1.0 on, each section is written by release-please
 from the [Conventional Commits](https://www.conventionalcommits.org/) merged into the release.
 
+## [0.3.0](https://github.com/paurosello/agwmap/compare/v0.2.0...v0.3.0) (2026-11-12)
+
+
+### Features
+
+* show a summary of each request flow ([#7](https://github.com/paurosello/agwmap/issues/7)) ([633a9c0](https://github.com/paurosello/agwmap/commit/633a9c0bddb8eb5556098986db3f6179958e0017))
+
 ## [0.2.0](https://github.com/paurosello/agwmap/compare/v0.1.0...v0.2.0) (2026-11-12)
 
 
