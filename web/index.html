@@ -552,8 +552,8 @@ function summaryHtml(e, gwPols) {
           const ws = [...doing(pols.filter(x => x.section === t.name)), ...(t.inline || []).map(said)], to = into[ti];
           if (t.mcp) { count.targets++; for (const w of ws) count.with.set(w, (count.with.get(w) || 0) + 1); }
           if (to) count.back++;
-          line(depth + 3, `<span class="mono">${esc(t.name)}</span> <span class="mut">${esc(t.where)}</span>${words(ws)}${to ? `<span class="badge ${to.r ? "go" : "bad"}" ${goto(to)}>${esc(intoText(to))}</span>` : ""}`);
-          if (to && to.r) line(depth + 4, `${nm(to.r)}${words(doing(polsOn(to.r.id)))}`);
+          line(depth + 3, `<span class="mono">${esc(t.name)}</span> <span class="mut">${esc(t.where)}</span>${words(ws)}${to && !to.r ? `<span class="badge bad" data-open="${esc(to.gw.id)}">${esc(intoText(to))}</span>` : ""}`);
+          if (to && to.r) line(depth + 4, `<span class="nm" ${goto(to)}><span class="k">${esc(to.r.kind)}</span> ${esc(to.r.name)}</span>${words(doing(polsOn(to.r.id)))}`);
         });
       }
     });
