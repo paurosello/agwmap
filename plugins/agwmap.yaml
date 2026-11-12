@@ -1,0 +1,53 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: agwmap
+spec:
+  version: v0.1.0
+  homepage: https://github.com/paurosello/agwmap
+  shortDescription: Map a cluster's gateway configuration in one HTML page
+  description: |
+    Reads the Gateway API and agentgateway objects of a cluster and writes one
+    self-contained HTML page with the request flow of every route: listener,
+    policies at each level, route, backends and upstream targets.
+    Captures are anonymized by default and can be exported and rendered again.
+
+      kubectl agwmap                       # current context -> agwmap.html
+      kubectl agwmap -n team-a -o a.html
+      kubectl agwmap -from snapshot.yaml
+  platforms:
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.1.0/agwmap_darwin_arm64.tar.gz
+    sha256: 09267cf8a9b8f337a64110831832bef62e5c4e9a789c8f9e8d6d78ff8a7236db
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.1.0/agwmap_darwin_amd64.tar.gz
+    sha256: 3e943955dc3aa1922968679333dcea134422a7c528abfdcc3b715dd38634423c
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.1.0/agwmap_linux_amd64.tar.gz
+    sha256: e4edf6d7c7f1ee97a03e05190501883834bf099a10ecccfb42c98f34556e3572
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.1.0/agwmap_linux_arm64.tar.gz
+    sha256: f0d86b561b896afb127e3fd87ecd5643f761e51a95f85555e8a74dae51c6cef0
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.1.0/agwmap_windows_amd64.tar.gz
+    sha256: 68d58c379ca9c3f9e08fe57b0fcdb6f49a8b1c86315cea8945bbb76fdee4f123
+    bin: kubectl-agwmap.exe
