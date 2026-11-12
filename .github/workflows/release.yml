@@ -1,8 +1,8 @@
 name: release
 
 # A tag like v0.1.0 builds the kubectl plugin archives, attaches them to the
-# GitHub release (creating it when release-please has not), and updates
-# plugins/agwmap.yaml on main so that krew installs the new version.
+# GitHub release (creating it when release-please has not), and opens a pull
+# request that updates plugins/agwmap.yaml so that krew installs the new version.
 # release-please calls it after tagging; a tag pushed by hand starts it too.
 # The job can be run again for the same tag: every step either repeats safely
 # or is skipped when its work is already there.
@@ -14,9 +14,17 @@ on:
       tag:
         required: true
         type: string
+  # Runs the current workflow again for a release that was already tagged.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.2.0
+        required: true
+        type: string
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency: release
 
@@ -66,14 +74,30 @@ jobs:
           fi
 
       # The manifest holds the checksums of the archives above, so it can only
-      # be committed after them. main may have moved in the meantime.
-      - name: Point krew at the new version
+      # be committed after them. main only takes pull requests, so the manifest
+      # goes to the release/krew branch and a pull request that the owner
+      # merges; krew sees the new version once it is merged.
+      - name: Open the pull request that points krew at the new version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          git pull --quiet --rebase origin main
+          git fetch --quiet origin main
+          git checkout --quiet -B release/krew origin/main
           mkdir -p plugins
           cp "${RUNNER_TEMP}/agwmap.yaml" plugins/agwmap.yaml
+          git add plugins/agwmap.yaml
+          if git diff --cached --quiet; then
+            echo "plugins/agwmap.yaml on main is already at ${TAG}"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add plugins/agwmap.yaml
-          git diff --cached --quiet || git commit -m "chore: update the krew manifest to ${TAG}"
-          git push origin main
+          git commit --quiet -m "chore: update the krew manifest to ${TAG}"
+          git push --quiet --force origin release/krew
+          title="chore: update the krew manifest to ${TAG}"
+          if [ -n "$(gh pr list --head release/krew --state open --json number --jq '.[].number')" ]; then
+            gh pr edit release/krew --title "$title"
+          else
+            gh pr create --head release/krew --base main --title "$title" \
+              --body "Points krew at ${TAG}. Merge it to make \`kubectl krew upgrade agwmap\` install the new version."
+          fi
