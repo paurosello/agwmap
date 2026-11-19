@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -77,7 +78,7 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "same as -n")
 	flag.BoolVar(&allNamespaces, "A", false, "read all namespaces (the default; accepted for kubectl parity)")
 	flag.BoolVar(&allNamespaces, "all-namespaces", false, "same as -A")
-	flag.StringVar(&o.from, "from", "", "render a YAML file, local or at an http(s) URL, instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
+	flag.StringVar(&o.from, "from", "", "render a YAML file, local or at an http(s) URL, or every YAML file under a folder, instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
 	flag.StringVar(&o.out, "o", "", "output file, or - for stdout; a .yaml name writes a snapshot instead of the page (default: a new file in the temp folder)")
 	flag.BoolVar(&o.open, "open", true, "open the page in the default browser when stderr is a terminal; -open=false only writes it")
 	flag.BoolVar(&o.anonymize, "anonymize", true, "replace hostnames, URLs, addresses, account ids and inline credentials with pseudonyms, and keep only gateway labels and annotations (object names and namespaces are kept); -anonymize=false keeps the real values")
@@ -258,6 +259,8 @@ func readSnapshot(src string) (*Snapshot, error) {
 			return nil, err
 		}
 		in, shown = bytes.NewReader(body), clean
+	} else if info, err := os.Stat(src); err == nil && info.IsDir() {
+		return readDir(src)
 	} else {
 		f, err := os.Open(src)
 		if err != nil {
@@ -279,6 +282,73 @@ func readSnapshot(src string) (*Snapshot, error) {
 		return nil, fmt.Errorf("%s holds no object of the gateway API groups", shown)
 	}
 	// A manifest taken from a cluster carries what a capture drops.
+	minimize(objs, false)
+	for i := range objs {
+		s.Objects = append(s.Objects, objs[i].Object)
+	}
+	return s, nil
+}
+
+// readDir reads every .yaml and .yml file under a folder as one manifest. A
+// folder of manifests also holds files that are not: a file that cannot be read
+// is skipped and named in a warning, and one without gateway objects is skipped
+// silently. Only the first definition of an object is kept, as a cluster holds
+// one; a snapshot in the folder is read for its objects alone.
+func readDir(dir string) (*Snapshot, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	s := &Snapshot{Meta: Meta{Context: filepath.Base(abs), GeneratedAt: time.Now().UTC().Format(time.RFC3339)}}
+	// The walk does not follow a link, also when the folder itself is one.
+	if dir, err = filepath.EvalSymlinks(dir); err != nil {
+		return nil, err
+	}
+	var objs []unstructured.Unstructured
+	definedIn := map[string]string{}
+	err = filepath.WalkDir(dir, func(file string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if file != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir // .git and the like
+			}
+			return nil
+		}
+		if ext := filepath.Ext(file); ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, file)
+		// The reason is not the error itself: a YAML error quotes the file.
+		f, err := os.Open(file)
+		if err != nil {
+			s.Meta.Warnings = append(s.Meta.Warnings, rel+" was skipped: it could not be opened")
+			return nil
+		}
+		found, _, err := readManifest(f)
+		f.Close()
+		if err != nil {
+			s.Meta.Warnings = append(s.Meta.Warnings, rel+" was skipped: it is not valid YAML")
+			return nil
+		}
+		for _, o := range found {
+			key := o.GroupVersionKind().Group + "/" + o.GetKind() + "/" + o.GetNamespace() + "/" + o.GetName()
+			if first, dup := definedIn[key]; dup && o.GetName() != "" {
+				s.Meta.Warnings = append(s.Meta.Warnings, fmt.Sprintf("%s: %s %s/%s is already defined in %s, this copy was skipped", rel, o.GetKind(), o.GetNamespace(), o.GetName(), first))
+				continue
+			}
+			definedIn[key] = rel
+			objs = append(objs, o)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) == 0 {
+		return nil, fmt.Errorf("%s holds no object of the gateway API groups in its .yaml and .yml files", dir)
+	}
 	minimize(objs, false)
 	for i := range objs {
 		s.Objects = append(s.Objects, objs[i].Object)

@@ -65,6 +65,15 @@ go install github.com/paurosello/agwmap@latest
 
 ## Use it
 
+To try it without a gateway of your own, or without a cluster, render the
+[demo manifest](testdata/demo.yaml) of this repository:
+
+```sh
+kubectl agwmap -from https://raw.githubusercontent.com/paurosello/agwmap/main/testdata/demo.yaml
+```
+
+Against a cluster, or a file:
+
 ```sh
 kubectl agwmap                                  # current kube context, anonymized, opened in the browser
 kubectl agwmap --context prod -n team-a -o a.html
@@ -72,6 +81,7 @@ kubectl agwmap -open=false                      # only write the page and print 
 kubectl agwmap -o snapshot.yaml                 # capture only, to send to someone
 kubectl agwmap -from snapshot.yaml -o a.html    # render a capture you received
 kubectl agwmap -from manifests.yaml             # render a manifest, without a cluster
+kubectl agwmap -from deploy/                    # the same for every YAML file under a folder
 kubectl agwmap -from https://example.com/gw.yaml  # the same for a file at a URL
 kubectl agwmap -anonymize=false                 # keep the real values
 ```
@@ -84,7 +94,7 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 | `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
 | `-o` | Output file. Default: a new `agwmap-*.html` in the temp folder, readable only by you. `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
 | `-open=false` | Do not open the page in the default browser. It is opened only when stderr is a terminal, so pipelines and CI jobs never open one. |
-| `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. Takes a local file or a URL. |
+| `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. Takes a local file, a folder or a URL. |
 | `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a manifest or a snapshot that was not. |
 | `-version` | Print the version. |
 
@@ -105,17 +115,17 @@ output of `helm template`, or the list that `kubectl get -o yaml` prints. It kee
 gateway API groups and skips everything else, so a Secret in the file is not read. Nothing checks a
 file the way an API server does: a misspelled field is not reported and defaults are not filled in.
 
+Given a folder, `-from` reads every `.yaml` and `.yml` file under it, subfolders included (not the
+hidden ones, such as `.git`), as one manifest. The files are read as they are: nothing runs
+`kustomize build` or `helm template`. A file that is not valid YAML, such as a Helm template, is
+skipped and named in the warning at the top of the page. When the same object is defined in more than
+one file, as in a base and its overlay, the first one in path order is kept and the others are named
+in that warning. To render a folder of a Git repository, clone it and point `-from` at the folder.
+
 `-from` also takes the URL of a file, which is downloaded with one GET request and read the same way.
 The URL must return the YAML itself: for a file on GitHub or GitLab that is the "Raw" link, not the
 page that shows the file. Only the URL without its query string is printed or kept, because the raw
 link to a file in a private repository can carry a token. A file larger than 32 MiB is refused.
-
-To try it without a gateway of your own, or without a cluster, render the
-[demo manifest](testdata/demo.yaml) of this repository:
-
-```sh
-kubectl agwmap -from https://raw.githubusercontent.com/paurosello/agwmap/main/testdata/demo.yaml
-```
 
 ## Supported resources
 
@@ -191,7 +201,8 @@ With anonymization, which is the default:
 | E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
 | Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
 | Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |
-| The kube context name, and the user and server named in warnings | In-cluster hostnames (`name.namespace.svc`) of a captured Gateway's proxy Service or of a Service an object refers to, so that a target that goes back through a gateway can be followed |
+| The kube context name or the name of the folder `-from` read, and the user and server named in warnings | The paths, inside a folder that `-from` read, of the files named in its warnings |
+| | In-cluster hostnames (`name.namespace.svc`) of a captured Gateway's proxy Service or of a Service an object refers to, so that a target that goes back through a gateway can be followed |
 
 Anonymization works by recognising values, so it can miss one it has no rule for, and it does not try
 to hide what your objects are called. If a name gives away more than you want to share, or you find a

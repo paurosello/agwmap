@@ -652,6 +652,85 @@ func TestFromURL(t *testing.T) {
 	}
 }
 
+// -from also takes a folder and reads the YAML files under it.
+func TestFromFolder(t *testing.T) {
+	const none = "/nonexistent" // no cluster is needed
+	const gateway = `apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: edge, namespace: shop}
+spec:
+  gatewayClassName: agentgateway
+  listeners: [{name: http, port: %d, protocol: HTTP}]
+`
+	dir := filepath.Join(t.TempDir(), "manifests")
+	for name, content := range map[string]string{
+		"base/gateway.yaml": fmt.Sprintf(gateway, 80),
+		"base/routes/cart.yml": `apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: cart, namespace: shop}
+spec:
+  parentRefs: [{name: edge}]
+  rules: [{backendRefs: [{name: cart, port: 8080}]}]
+`,
+		"overlay/gateway.yaml":   fmt.Sprintf(gateway, 8080), // the same Gateway again
+		"chart/templates/x.yaml": "kind: Gateway\nmetadata:\n  name: {{ .Release.Name }}\n{{- if .Values.on }}\n",
+		"chart/values.yaml":      "replicas: 2\n",
+		".git/hidden.yaml":       strings.Replace(fmt.Sprintf(gateway, 80), "edge", "hidden", 1),
+		"notes.txt":              strings.Replace(fmt.Sprintf(gateway, 80), "edge", "not-yaml", 1),
+	} {
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := snapshotOf(t, out(t, none, "folder.yaml", "-from", dir, "-anonymize=false"))
+	var got []string
+	for _, o := range s.Objects {
+		meta, _ := o["metadata"].(map[string]any)
+		got = append(got, fmt.Sprint(o["kind"], "/", meta["name"]))
+	}
+	sort.Strings(got)
+	if want := []string{"Gateway/edge", "HTTPRoute/cart"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("objects = %v, want %v", got, want)
+	}
+	if s.Meta.Context != "manifests" {
+		t.Errorf("context = %q, want the folder name", s.Meta.Context)
+	}
+	// The first definition of the Gateway is the one kept.
+	if raw, _ := yaml.Marshal(s.Objects); strings.Contains(string(raw), "8080\n    protocol") || !strings.Contains(string(raw), "port: 80\n") {
+		t.Errorf("the kept Gateway is not the first one:\n%s", raw)
+	}
+	warnings := strings.Join(s.Meta.Warnings, "\n")
+	if len(s.Meta.Warnings) != 2 ||
+		!strings.Contains(warnings, filepath.Join("chart", "templates", "x.yaml")+" was skipped") ||
+		!strings.Contains(warnings, "Gateway shop/edge is already defined in "+filepath.Join("base", "gateway.yaml")) {
+		t.Errorf("warnings = %q", s.Meta.Warnings)
+	}
+	// Through a link to the folder, and anonymized: the warnings name the files
+	// by their path inside the folder and quote nothing of them.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	page := mustRun(t, none, "-from", link, "-o", "-")
+	g := graphOf(t, page)
+	if !g.Meta.Anonymized || g.Meta.Context != "cluster" || !reflect.DeepEqual(g.Meta.Warnings, s.Meta.Warnings) {
+		t.Errorf("page meta = %+v", g.Meta)
+	}
+	if strings.Contains(page, "Release.Name") || strings.Contains(page, filepath.Dir(dir)) {
+		t.Error("the page holds the text of a skipped file or the path of the folder")
+	}
+
+	empty := filepath.Join(dir, "chart")
+	if _, stderr, code := agwmap(t, none, "-from", empty, "-o", "-"); code != 1 || !strings.Contains(stderr, "no object of the gateway API groups") {
+		t.Errorf("a folder without gateway objects: exit %d, stderr %q", code, stderr)
+	}
+}
+
 func TestDefaultOutput(t *testing.T) {
 	demo, err := filepath.Abs("testdata/demo.yaml")
 	if err != nil {
