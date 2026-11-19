@@ -38,6 +38,12 @@ header .meta{color:var(--mut);font-size:.92em}
 main{padding:16px}
 .warn{background:color-mix(in srgb,var(--ratelimit) 14%,var(--panel));border:1px solid var(--ratelimit);
   border-radius:var(--radius);padding:8px 12px;margin-bottom:12px}
+.badge.help{cursor:help;font-weight:400;font-family:var(--mono)}
+.tree .g .help{margin-left:auto}
+.tree .g .help+.n{margin-left:0}
+.badge.help:hover{border-color:var(--key);color:var(--key)}
+#tip{position:fixed;z-index:50;display:none;width:max-content;max-width:min(340px,90vw);background:var(--soft);border:1px solid var(--key);
+  border-radius:var(--radius);box-shadow:var(--shadow);padding:8px 10px;font-size:.92em;pointer-events:none}
 .mut{color:var(--mut)} .mono{font-family:var(--mono);font-size:.92em}
 .empty{color:var(--mut);font-style:italic}
 [data-open],[data-goto]{cursor:pointer}
@@ -170,6 +176,7 @@ td.num{text-align:right;font-family:var(--mono);font-size:.92em;color:var(--mut)
 </header>
 <main><div id="warn"></div><div id="view"></div></main>
 <aside id="drawer"></aside>
+<div id="tip" role="tooltip"></div>
 <script id="data" type="application/json">__GWMAP_DATA__</script>
 <script>
 "use strict";
@@ -194,13 +201,33 @@ const tag = f => `<span class="tag" style="--c:var(--${f.cat})">${esc(CAT[f.cat]
 const rc = n => `--rc:var(--${["gateway","route","backend","policy"].includes(n.role) ? n.role : n.role === "listenerset" ? "gateway" : "external"})`;
 
 /* ---------- model ---------- */
-const gateways = byRole("gateway"), routes = byRole("route");
+// A capture of one namespace (-n) holds nothing of the others. What it refers to there
+// was not read, which is not the same as missing: the page must not report it as a fault.
+const NS = D.meta.namespace || "";
+const unread = n => !!(NS && n.external && n.ns && n.ns !== NS);
+// A gateway in a namespace that was not read still starts a flow, for the routes and
+// listener sets that name it as their parent.
+const isGw = n => n.role === "gateway" || (unread(n) && n.kind === "Gateway" && inE(n.id).some(e => e.type === "parent"));
+const gateways = D.nodes.filter(isGw), routes = byRole("route");
 // policies attached to an object: [{p, section}]
 const polsOn = id => inE(id).filter(e => e.type === "target").map(e => ({p: N.get(e.from), section: e.section || ""}));
 // listener sets that add listeners to a gateway
 const listenerSets = g => inE(g.id).filter(e => e.type === "parent" && N.get(e.from).role === "listenerset").map(e => N.get(e.from));
 // every listener of a gateway: its own and those of its listener sets: [{l, via}]
-const listenersOf = g => [...(spec(g).listeners || []).map(l => ({l, via: null})),
+// Of a gateway that was not read, the listeners are known only as far as routes name
+// them: by sectionName, by port, or not at all (every listener that takes the route).
+function namedListeners(g) {
+  const m = new Map();
+  for (const e of inE(g.id)) {
+    const r = N.get(e.from);
+    if (e.type !== "parent" || r.role !== "route") continue;
+    const port = (get(r.obj, e.path || "") || {}).port, k = (e.section || "") + ":" + (port || "");
+    if (!m.has(k)) m.set(k, {l: {name: e.section || "", port, unread: true}, via: null});
+  }
+  return [...m.values()];
+}
+const listenerText = l => l.unread ? `${l.name || "any listener"}${l.port ? " :" + l.port : ""} · not captured` : `${l.name} · ${l.protocol} :${l.port}`;
+const listenersOf = g => [...(g.external ? namedListeners(g) : (spec(g).listeners || []).map(l => ({l, via: null}))),
   ...listenerSets(g).flatMap(ls => (spec(ls).listeners || []).map(l => ({l, via: ls})))];
 // where a route attaches, directly or through a listener set: [{gw, via, section}]
 // A route can also hang under another route (delegation): by naming it as its
@@ -211,10 +238,10 @@ function parentsOf(r, seen = new Set()) {
   const ups = [...outE(r.id).filter(e => e.type === "parent").map(e => ({p: N.get(e.to), section: e.section || "", port: (get(r.obj, e.path || "") || {}).port})),
     ...inE(r.id).filter(e => e.type === "backend" && N.get(e.from).role === "route").map(e => ({p: N.get(e.from), section: ""}))];
   return ups.flatMap(({p, section, port}) => {
-    if (p.role === "gateway") return [{gw: p, via: null, section, port}];
+    if (isGw(p)) return [{gw: p, via: null, section, port}];
     if (p.role === "route") return parentsOf(p, seen).map(x => ({...x, viaRoute: p}));
     if (p.role !== "listenerset") return [];
-    const up = outE(p.id).find(x => x.type === "parent" && N.get(x.to).role === "gateway");
+    const up = outE(p.id).find(x => x.type === "parent" && isGw(N.get(x.to)));
     return up ? [{gw: N.get(up.to), via: p, section, port}] : [];
   });
 }
@@ -231,6 +258,7 @@ const ROUTE_PROTOCOLS = {HTTPRoute: ["HTTP", "HTTPS"], GRPCRoute: ["HTTP", "HTTP
 const hostsOverlap = (a, b) => a === b || (a.startsWith("*.") && b.endsWith(a.slice(1))) || (b.startsWith("*.") && a.endsWith(b.slice(1)));
 function accepts(le, owner, r, p) {
   const l = le.l, allowed = l.allowedRoutes || {}, hosts = spec(r).hostnames || [];
+  if (l.unread) return (p.section || "") === l.name && p.port === l.port; // it exists only as what the route names
   if (p.section && p.section !== l.name) return false;
   if (p.port && p.port !== l.port) return false;
   if (l.hostname && hosts.length && !hosts.some(h => hostsOverlap(l.hostname, h))) return false;
@@ -313,7 +341,7 @@ function pathMatches(p, path) {
 // Returns {gw, le, r}, with le and r missing when nothing there takes it.
 function intoGateway(addr) {
   const m = addr && /^([^.:]+)\.([^.:]+)\.svc(\.cluster\.local)?$/.exec(addr.host || "");
-  const gw = m && gateways.find(g => g.name === m[1] && g.ns === m[2]);
+  const gw = m && gateways.find(g => !g.external && g.name === m[1] && g.ns === m[2]);
   if (!gw) return null;
   const le = listenersOf(gw).find(x => x.l.port === (addr.port || 80));
   if (!le) return {gw};
@@ -340,6 +368,11 @@ const conditions = n => {
   return all.filter(c => !seen.has(c.type + c.status) && seen.add(c.type + c.status));
 };
 const failing = n => conditions(n).filter(c => c.status !== "True"), types = cs => esc(cs.map(c => c.type).join(", "));
+const condText = cs => cs.map(c => `${c.type} ${c.status === "True" ? "✓" : "✗ " + [c.reason, c.message].filter(Boolean).join(": ")}`).join(" · ");
+// What the controller of one parent reports about a route: that parent's entry in status.parents.
+const parentConditions = (r, p, l) => (get(r.obj, "status.parents") || []).filter(x => { const pr = x.parentRef || {};
+  return pr.name === p.name && (pr.namespace || r.ns) === p.ns && (pr.kind || "Gateway") === p.kind && (pr.sectionName || "") === l.name && pr.port == l.port; })
+  .flatMap(x => x.conditions || []);
 
 // A value as YAML, in HTML. Strings are quoted whenever a YAML parser could take
 // them for something else: the export is this text, and agwmap reads it back.
@@ -397,6 +430,7 @@ function crossBadge(e) {
   if (!e || !e.crossNs) return "";
   if (e.grant) { const g = N.get(e.grant); inFlow.add(g.id);
     return `<span class="badge" data-open="${esc(g.id)}">cross-namespace · allowed by ReferenceGrant ${esc(g.name)}</span>`; }
+  if (unread(N.get(e.to))) return `<span class="badge" title="A ReferenceGrant that allows this would be in namespace ${esc(N.get(e.to).ns)}, which was not read. The ResolvedRefs condition of the object that refers to it says whether it is allowed.">cross-namespace · ReferenceGrant not visible</span>`;
   return ["route", "gateway", "listenerset"].includes(N.get(e.from).role)
     ? `<span class="badge bad" title="The reference leaves its namespace and no ReferenceGrant in the target namespace allows it">cross-namespace · no ReferenceGrant</span>`
     : `<span class="badge">cross-namespace</span>`;
@@ -438,13 +472,16 @@ const stage = (n, color, title, body) => `<div class="stage" style="--sc:var(--$
 // Service in the mesh), plus listeners without routes and unattached routes.
 const entries = [];
 for (const g of gateways) {
-  const grp = {id: g.id, label: g.ns + "/" + g.name}; // one sidebar group per gateway, shared by its listeners
+  const grp = {id: g.id, label: g.ns + "/" + g.name, // one sidebar group per gateway, shared by its listeners
+    help: g.external ? `This gateway is in namespace ${g.ns}. Only ${NS} was read, so it is either outside that namespace or not something you may read. It is drawn from what the routes and listener sets of ${NS} say about it: its own listeners, its class and the policies attached to it are not shown.` : ""};
   for (const le of listenersOf(g)) {
     const rs = routesOf(g, le);
     if (rs.length) for (const r of rs) entries.push({grp, gw: g, le, r}); else entries.push({grp, gw: g, le, r: null});
   }
 }
-const MESH = {id: "mesh", label: "Mesh · attached to a Service"}, NONE = {id: "none", label: "Not attached to a listener"};
+// In one namespace, a route without a parent may be delegated to by a route of another.
+const MESH = {id: "mesh", label: "Mesh · attached to a Service"}, NONE = {id: "none", label: NS ? "No parent in this namespace" : "Not attached to a listener",
+  help: NS ? `These routes name no parent that was read. Only ${NS} was read: their parent is either in another namespace or not something you may read, for example a route there that delegates to them.` : ""};
 const placed = new Set(entries.filter(e => e.r).map(e => e.r.id));
 for (const r of routes) {
   if (placed.has(r.id) || (isChildRoute(r) && parentsOf(r).length)) continue; // on a listener, or drawn inside its parent route
@@ -452,7 +489,7 @@ for (const r of routes) {
   if (svcs.length) for (const svc of svcs) entries.push({grp: MESH, svc, r});
   else if (!isChildRoute(r)) entries.push({grp: NONE, r});
 }
-entries.forEach(e => e.key = [e.r ? e.r.id : "", e.gw ? e.gw.id : e.svc ? e.svc.id : "", e.le ? (e.le.via ? e.le.via.id : "") + "#" + e.le.l.name : ""].join("|"));
+entries.forEach(e => e.key = [e.r ? e.r.id : "", e.gw ? e.gw.id : e.svc ? e.svc.id : "", e.le ? (e.le.via ? e.le.via.id : "") + "#" + e.le.l.name + (e.le.l.unread && e.le.l.port ? ":" + e.le.l.port : "") : ""].join("|"));
 // Routes that a backend target sends back through a gateway: entry key -> [{key, target}].
 // In the sidebar they hang under the route that leads to them, when some route that is not
 // itself reached that way leads to them (two routes that only lead to each other stay on top).
@@ -526,7 +563,7 @@ const nm = n => `<span class="nm" data-open="${esc(n.id)}"><span class="k">${esc
 function summaryHtml(e, gwPols) {
   const lines = [], count = {rules: 0, backends: new Set(), targets: 0, with: new Map(), back: 0};
   const line = (depth, body) => lines.push(`<div class="sl" style="--d:${depth}">${body}</div>`);
-  if (e.gw) line(0, `${nm(e.gw)} <span class="mut mono">${esc(e.le.l.name)} · ${esc(e.le.l.protocol)} :${esc(e.le.l.port)}</span>${words(doing(gwPols))}`);
+  if (e.gw) line(0, `${nm(e.gw)} <span class="mut mono">${esc(listenerText(e.le.l))}</span>${words(doing(gwPols))}`);
   else if (e.svc) line(0, `${nm(e.svc)} <span class="mut">in the mesh</span>${words(doing(gwPols))}`);
   const route = (r, depth, seen) => {
     line(depth, `${nm(r)}${words(doing(polsOn(r.id)))}`);
@@ -574,8 +611,14 @@ function flowHtml(e) {
   sameSetting = settingsOnPath(e, gwPols);
   let h = summaryHtml(e, gwPols), i = 1;
   if (e.gw) {
-    const lkv = kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
+    const lkv = l.unread ? kv([["listener", l.name || "not named by the route: every listener of the gateway that takes it"], ["port", l.port]])
+      : kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
       ["tls", l.tls ? [l.tls.mode || "Terminate", (l.tls.certificateRefs || []).map(c => c.name).join(", ")].filter(Boolean).join(" · ") : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
+    // A gateway that was not read: what its controller reports on the listener set or the
+    // route that names it is all there is to know about it.
+    const away = !e.gw.external ? "" : kv([
+      [`reported for ${(via || r || {}).name || "it"}`, condText(via ? conditions(via) : r ? parentConditions(r, e.gw, l) : []) || "no status"],
+      ["not shown", `Namespace ${e.gw.ns} was not read: the gateway's own listeners, its class and the policies attached to it are not on this page.`]]);
     // The listener's own status, and only the references of this listener (not the certificates of the others).
     const owner = via || e.gw, lbad = ((get(owner.obj, "status.listeners") || []).find(x => x.name === l.name) || {conditions: []}).conditions.filter(c => c.status !== "True");
     const lstatus = lbad.length ? `<span class="badge bad" title="${esc(lbad.map(c => `${c.type}: ${c.reason || ""} ${c.message || ""}`).join("\n"))}">✗ listener ${types(lbad)}</span>` : "";
@@ -584,18 +627,20 @@ function flowHtml(e) {
     const refs = o => uses(o, new Set([o.id]), mine(o));
     // A Gateway API ListenerSet is only taken by a gateway whose allowedListeners admits its namespace (default: none).
     const from = get(spec(e.gw), "allowedListeners.namespaces.from") || "None";
-    const refused = via && /^gateway\.networking\.(x-)?k8s\.io$/.test(via.group) && !(from === "All" || from === "Selector" || (from === "Same" && via.ns === e.gw.ns));
+    const refused = via && !e.gw.external && /^gateway\.networking\.(x-)?k8s\.io$/.test(via.group) && !(from === "All" || from === "Selector" || (from === "Same" && via.ns === e.gw.ns));
     h += stage(i++, "gateway", "Client connects to the listener",
-      card(e.gw, via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv, via ? "" : lstatus) + refs(e.gw) +
+      card(e.gw, (via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + away, via ? "" : lstatus) + refs(e.gw) +
       (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>${refused ? `<span class="badge bad" title="spec.allowedListeners of the gateway is ${esc(from)}: it does not take listeners from this ListenerSet">not allowed by the gateway's allowedListeners</span>` : ""}${lstatus}`) + refs(via)}</div>` : ""));
-    h += stage(i++, "policy", "Policies attached to the gateway", polCards(gwPols, "None at gateway level."));
+    h += stage(i++, "policy", "Policies attached to the gateway", e.gw.external
+      ? polCards(gwPols) + `<div class="empty">Not visible: a policy on the gateway is in namespace ${esc(e.gw.ns)}, which was not read.</div>`
+      : polCards(gwPols, "None at gateway level."));
   } else if (e.svc) {
     h += stage(i++, "gateway", "Traffic in the mesh addressed to the Service",
       card(e.svc, `<div class="kv"><span>note</span><span>The route applies to requests for this Service. Which waypoint or proxy handles them is set by labels on the Service or its namespace, which are not captured.</span></div>`, continues(e.svc)));
     h += stage(i++, "policy", "Policies attached to the Service", polCards(gwPols, "None on the Service."));
   }
   h += stage(i++, "route", r && ["TLSRoute", "TCPRoute", "UDPRoute"].includes(r.kind) ? "Route takes the connection" : "Route matches the request", r ? card(r, kv([["hostnames", (spec(r).hostnames || []).join(", ")], ["rules", (spec(r).rules || []).length]]))
-    : `<div class="empty">No route is attached to this listener.</div>`);
+    : `<div class="empty">${NS ? `No route in ${esc(NS)} is attached to this listener; routes of other namespaces were not read.` : "No route is attached to this listener."}</div>`);
   if (r) {
     h += stage(i++, "policy", "Policies attached to the route", polCards(polsOn(r.id), "None at route level."));
     h += stage(i++, "backend", "Backends, their policies and upstream targets", rulesHtml(r));
@@ -621,7 +666,7 @@ function viewFlow(root) {
   });
   const row = (e, depth, via) => `<div class="r ${e.key === sel ? "on" : ""}" data-k="${esc(e.key)}"${depth ? ` style="--d:${depth}"` : ""}>${e.r
     ? `${depth ? `<span class="kid">↳</span>` : ""}${esc(e.r.name)}<small>${via ? `from target ${esc(via)} · ` : ""}${esc(e.r.kind === "HTTPRoute" ? "" : e.r.kind + " · ")}${esc((spec(e.r).hostnames || []).join(", ") || e.r.ns)}</small>`
-    : `<span class="empty">no routes attached</span>`}</div>`;
+    : `<span class="empty">no routes attached${NS ? " from this namespace" : ""}</span>`}</div>`;
   // the routes a route's targets lead back to, under it (once per path, so a loop ends)
   const kids = (e, depth, seen) => (backInto.get(e.key) || []).filter(c => !seen.has(c.key)).map(c => {
     const k = entries.find(x => x.key === c.key);
@@ -635,13 +680,13 @@ function viewFlow(root) {
       const shut = collapsed.has(e.grp.id);
       if (e.grp !== lastG) {
         const n = entries.filter(x => x.grp === e.grp && x.r).length;
-        h += `<div class="g" data-g="${esc(e.grp.id)}" title="${shut ? "Expand" : "Collapse"}"><span class="caret">${shut ? "▸" : "▾"}</span>${esc(e.grp.label)}<span class="n">${n}</span></div>`;
+        h += `<div class="g" data-g="${esc(e.grp.id)}" title="${shut ? "Expand" : "Collapse"}"><span class="caret">${shut ? "▸" : "▾"}</span>${esc(e.grp.label)}${e.grp.help ? `<span class="badge help" title="" data-tip="${esc(e.grp.help)}">?</span>` : ""}<span class="n">${n}</span></div>`;
         lastG = e.grp; lastL = null;
       }
       if (shut) continue;
       const lkey = e.le || e.svc;
       if (lkey && lkey !== lastL) {
-        h += e.le ? `<div class="l">${esc(e.le.l.name)} · ${esc(e.le.l.protocol)} :${esc(e.le.l.port)}${e.le.via ? ` · via ${esc(e.le.via.name)}` : ""}</div>`
+        h += e.le ? `<div class="l">${esc(listenerText(e.le.l))}${e.le.via ? ` · via ${esc(e.le.via.name)}` : ""}</div>`
           : `<div class="l">Service ${esc(e.svc.ns)}/${esc(e.svc.name)}</div>`;
         lastL = lkey;
       }
@@ -651,6 +696,7 @@ function viewFlow(root) {
   };
   const show = () => { const e = entries.find(x => x.key === sel); flow.innerHTML = e ? flowHtml(e) : `<div class="empty">No gateways or routes in this capture.</div>`; };
   tree.addEventListener("click", ev => {
+    if (ev.target.closest(".help")) return; // the "?" explains the group, it does not fold it
     const g = ev.target.closest(".g"), el = ev.target.closest(".r");
     if (g) { const id = g.dataset.g; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); paint(curQ()); }
     else if (el) { sel = el.dataset.k; paint(curQ()); show(); }
@@ -662,15 +708,16 @@ function viewFlow(root) {
 /* ---------- outside the flow ---------- */
 // Captured objects that no request flow reaches: nothing is left out of the page.
 function viewOutside(root) {
-  const why = n => n.role === "policy" ? (outE(n.id).some(e => e.type === "target" && !N.get(e.to).external) ? "attached to an object that no route uses" : "its target was not found")
-    : n.role === "backend" ? "no route sends traffic to it"
-    : n.role === "params" ? "no gateway or class uses it"
-    : n.role === "class" ? "no gateway uses it"
+  const here = NS ? " in this namespace" : ""; // what uses it may be in a namespace that was not read
+  const why = n => n.role === "policy" ? (outE(n.id).some(e => e.type === "target" && !N.get(e.to).external) ? `attached to an object that no route${here} uses` : "its target was not found")
+    : n.role === "backend" ? `no route${here} sends traffic to it`
+    : n.role === "params" ? `no gateway or class${here} uses it`
+    : n.role === "class" ? `no gateway${here} uses it`
     : /RBAC|RoleBinding/.test(n.kind) ? "access to the management UI, not to traffic"
-    : n.kind === "ReferenceGrant" ? "allows no reference that was captured"
+    : n.kind === "ReferenceGrant" ? (NS ? "allows references from other namespaces, which were not read" : "allows no reference that was captured")
     : n.kind.endsWith("Mesh") ? "mesh-wide settings, not on a request path"
-    : !inE(n.id).length ? "nothing refers to it" : "used only by objects outside the flow";
-  root.innerHTML = `<p class="mut">Objects that no request flow reaches: unused or dangling configuration, and settings that are not about traffic. Everything captured is either in a flow or listed here.</p><div class="flow" id="outside"></div>`;
+    : !inE(n.id).length ? `nothing${here} refers to it` : "used only by objects outside the flow";
+  root.innerHTML = `<p class="mut">Objects that no request flow reaches: unused or dangling configuration, and settings that are not about traffic. Everything captured is either in a flow or listed here.${NS ? ` Only ${esc(NS)} was read: something in another namespace may still use what is listed.` : ""}</p><div class="flow" id="outside"></div>`;
   const box = root.querySelector("#outside");
   const paint = q => {
     const groups = new Map();
@@ -739,7 +786,8 @@ function openDetail(id) {
   drawer.innerHTML = `<div class="dh"><button class="x" title="Close">×</button><span class="st">${esc(n.group ? n.group + "/" : "")}${esc(n.version || "")} ${esc(n.kind)}</span>
       <h2>${esc(n.name)}</h2><span class="mut">${esc(n.ns || "cluster-scoped")}</span></div>
     <div class="db">
-      ${n.external ? `<p class="mut">This object is only referred to. agwmap does not capture ${esc(n.kind)} objects, so it may or may not exist.</p>` : ""}
+      ${unread(n) && n.group ? `<p class="mut">This object is in namespace ${esc(n.ns)}, and only ${esc(NS)} was read: it is known here by what refers to it.</p>`
+        : n.external ? `<p class="mut">This object is only referred to. agwmap does not capture ${esc(n.kind)} objects, so it may or may not exist.</p>` : ""}
       ${(n.features || []).length ? `<h3>Configures</h3><div class="feats">${n.features.map(f => `<span>${tag(f)} <span class="mono">${esc(f.key)}</span></span>`).join("")}</div>` : ""}
       ${outE(id).length ? `<h3>Refers to</h3>${outE(id).map(e => rel(e, e.to, "→")).join("")}` : ""}
       ${inE(id).length ? `<h3>Referred to by</h3>${inE(id).map(e => rel(e, e.from, "←")).join("")}` : ""}
@@ -753,6 +801,17 @@ drawer.addEventListener("click", e => {
   if (e.target.closest(".copy")) navigator.clipboard.writeText(drawer.querySelector("pre").textContent);
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") drawer.classList.remove("on"); });
+// The explanation behind a "?": shown under it while the pointer is on it. It is placed
+// on the viewport, so the scrolling sidebar does not cut it off.
+document.addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-tip]"), tip = $("tip");
+  if (!el) { tip.style.display = "none"; return; }
+  tip.textContent = el.dataset.tip;
+  tip.style.display = "block";
+  const r = el.getBoundingClientRect();
+  tip.style.left = Math.max(8, Math.min(r.left, innerWidth - tip.offsetWidth - 8)) + "px";
+  tip.style.top = r.bottom + 6 + "px";
+});
 document.addEventListener("click", e => {
   if (e.target.closest("summary") || String(getSelection())) return; // expanding or selecting text is not a click on the card
   const go = e.target.closest("[data-goto]");
