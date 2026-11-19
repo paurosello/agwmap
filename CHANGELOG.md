@@ -4,6 +4,14 @@ All notable changes to agwmap are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). From 0.1.0 on, each section is written by release-please
 from the [Conventional Commits](https://www.conventionalcommits.org/) merged into the release.
 
+## [0.4.0](https://github.com/paurosello/agwmap/compare/v0.3.0...v0.4.0) (2026-11-19)
+
+
+### Features
+
+* draw the request flow of one namespace when its gateway is in another ([#11](https://github.com/paurosello/agwmap/issues/11)) ([64be794](https://github.com/paurosello/agwmap/commit/64be794a930a15ea7911a74960f61572a4bc7a90))
+* render a manifest from a URL or a folder ([#10](https://github.com/paurosello/agwmap/issues/10)) ([0a945f8](https://github.com/paurosello/agwmap/commit/0a945f81d04d231403ce2ade6e609f298d959c10))
+
 ## [0.3.0](https://github.com/paurosello/agwmap/compare/v0.2.0...v0.3.0) (2026-11-12)
 
 
