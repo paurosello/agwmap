@@ -600,6 +600,58 @@ stringData: {token: sk-leak-from-a-manifest}
 
 // Without -o the page goes to a new file in the temp folder, and no browser is
 // opened when stderr is not a terminal.
+// -from also takes the URL of a file.
+func TestFromURL(t *testing.T) {
+	const none = "/nonexistent" // no cluster is needed
+	demo, err := filepath.Abs("testdata/demo.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/raw/demo.yaml":
+			http.ServeFile(w, r, demo)
+		case "/blob/demo.yaml":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<html></html>")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	// The query stands for the token in the link to a file of a private repository.
+	stdout, stderr, code := agwmap(t, none, "-from", srv.URL+"/raw/demo.yaml?token=tok-secret", "-anonymize=false", "-o", "-")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr)
+	}
+	g := graphOf(t, stdout)
+	if got, want := shape(g), shape(graphOf(t, mustRun(t, none, "-from", demo, "-anonymize=false", "-o", "-"))); !reflect.DeepEqual(got, want) {
+		t.Errorf("the page from a URL differs from the one from the file:\n%s", diff(want, got))
+	}
+	if g.Meta.Context != "demo.yaml" {
+		t.Errorf("context = %q, want the file name", g.Meta.Context)
+	}
+	if strings.Contains(stdout+stderr, "tok-secret") {
+		t.Error("the query of the URL is in the output")
+	}
+
+	for path, want := range map[string]string{
+		"/missing.yaml?token=tok-secret":   "404",
+		"/blob/demo.yaml?token=tok-secret": "use the link to the raw file",
+	} {
+		_, stderr, code := agwmap(t, none, "-from", srv.URL+path, "-o", "-")
+		if code != 1 || !strings.Contains(stderr, want) || strings.Contains(stderr, "tok-secret") {
+			t.Errorf("%s: exit %d, stderr %q", path, code, stderr)
+		}
+	}
+	// Nothing listens here.
+	srv.Close()
+	if _, stderr, code := agwmap(t, none, "-from", srv.URL+"/raw/demo.yaml?token=tok-secret", "-o", "-"); code != 1 || strings.Contains(stderr, "tok-secret") {
+		t.Errorf("unreachable: exit %d, stderr %q", code, stderr)
+	}
+}
+
 func TestDefaultOutput(t *testing.T) {
 	demo, err := filepath.Abs("testdata/demo.yaml")
 	if err != nil {

@@ -72,6 +72,7 @@ kubectl agwmap -open=false                      # only write the page and print 
 kubectl agwmap -o snapshot.yaml                 # capture only, to send to someone
 kubectl agwmap -from snapshot.yaml -o a.html    # render a capture you received
 kubectl agwmap -from manifests.yaml             # render a manifest, without a cluster
+kubectl agwmap -from https://example.com/gw.yaml  # the same for a file at a URL
 kubectl agwmap -anonymize=false                 # keep the real values
 ```
 
@@ -83,7 +84,7 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 | `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
 | `-o` | Output file. Default: a new `agwmap-*.html` in the temp folder, readable only by you. `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
 | `-open=false` | Do not open the page in the default browser. It is opened only when stderr is a terminal, so pipelines and CI jobs never open one. |
-| `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. |
+| `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. Takes a local file or a URL. |
 | `-anonymize=false` | Keep the real values. Without it the output is anonymized, also when `-from` is given a manifest or a snapshot that was not. |
 | `-version` | Print the version. |
 
@@ -104,8 +105,17 @@ output of `helm template`, or the list that `kubectl get -o yaml` prints. It kee
 gateway API groups and skips everything else, so a Secret in the file is not read. Nothing checks a
 file the way an API server does: a misspelled field is not reported and defaults are not filled in.
 
-To try it without a gateway of your own, or without a cluster, render
-[`testdata/demo.yaml`](testdata/demo.yaml): `kubectl agwmap -from testdata/demo.yaml`.
+`-from` also takes the URL of a file, which is downloaded with one GET request and read the same way.
+The URL must return the YAML itself: for a file on GitHub or GitLab that is the "Raw" link, not the
+page that shows the file. Only the URL without its query string is printed or kept, because the raw
+link to a file in a private repository can carry a token. A file larger than 32 MiB is refused.
+
+To try it without a gateway of your own, or without a cluster, render the
+[demo manifest](testdata/demo.yaml) of this repository:
+
+```sh
+kubectl agwmap -from https://raw.githubusercontent.com/paurosello/agwmap/main/testdata/demo.yaml
+```
 
 ## Supported resources
 
