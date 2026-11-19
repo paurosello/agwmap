@@ -26,16 +26,12 @@ metadata:
 spec:
   version: ${VERSION}
   homepage: ${REPO}
-  shortDescription: Map a cluster's gateway configuration in one HTML page
+  shortDescription: Map the gateway configuration as an HTML page
   description: |
     Reads the Gateway API and agentgateway objects of a cluster and writes one
     self-contained HTML page with the request flow of every route: listener,
     policies at each level, route, backends and upstream targets.
     Captures are anonymized by default and can be exported and rendered again.
-
-      kubectl agwmap                       # current context, opened in the browser
-      kubectl agwmap -n team-a -o a.html
-      kubectl agwmap -from snapshot.yaml
   platforms:
 EOF
   for p in $PLATFORMS; do
