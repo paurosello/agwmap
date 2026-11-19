@@ -9,9 +9,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,7 +78,7 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "same as -n")
 	flag.BoolVar(&allNamespaces, "A", false, "read all namespaces (the default; accepted for kubectl parity)")
 	flag.BoolVar(&allNamespaces, "all-namespaces", false, "same as -A")
-	flag.StringVar(&o.from, "from", "", "render a YAML file instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
+	flag.StringVar(&o.from, "from", "", "render a YAML file, local or at an http(s) URL, or every YAML file under a folder, instead of reading a cluster: a snapshot exported earlier, or any manifest of gateway objects")
 	flag.StringVar(&o.out, "o", "", "output file, or - for stdout; a .yaml name writes a snapshot instead of the page (default: a new file in the temp folder)")
 	flag.BoolVar(&o.open, "open", true, "open the page in the default browser when stderr is a terminal; -open=false only writes it")
 	flag.BoolVar(&o.anonymize, "anonymize", true, "replace hostnames, URLs, addresses, account ids and inline credentials with pseudonyms, and keep only gateway labels and annotations (object names and namespaces are kept); -anonymize=false keeps the real values")
@@ -243,42 +247,141 @@ func (s *Snapshot) yaml() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// readSnapshot reads a multi-document YAML file: a snapshot that agwmap wrote,
-// or any manifest, such as what kubectl apply -f takes or the List that kubectl
-// get -o yaml prints. Like a capture, it keeps only the objects of the gateway
-// API groups, so a Secret or a ConfigMap in the file is never read further.
-func readSnapshot(file string) (*Snapshot, error) {
-	f, err := os.Open(file)
+// readSnapshot reads a multi-document YAML file, local or at an http(s) URL: a
+// snapshot that agwmap wrote, or any manifest, such as what kubectl apply -f
+// takes or the List that kubectl get -o yaml prints.
+func readSnapshot(src string) (*Snapshot, error) {
+	var in io.Reader
+	shown := src // what messages and the page call the source
+	if isURL(src) {
+		body, clean, err := fetch(src)
+		if err != nil {
+			return nil, err
+		}
+		in, shown = bytes.NewReader(body), clean
+	} else if info, err := os.Stat(src); err == nil && info.IsDir() {
+		return readDir(src)
+	} else {
+		f, err := os.Open(src)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		in = bufio.NewReader(f)
+	}
+
+	// What a manifest does not say about itself; a snapshot's first document does.
+	s := &Snapshot{Meta: Meta{Context: filepath.Base(shown), GeneratedAt: time.Now().UTC().Format(time.RFC3339)}}
+	objs, head, err := readManifest(in)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", shown, err)
+	}
+	if head != nil {
+		s.Meta = *head
+	} else if len(objs) == 0 {
+		return nil, fmt.Errorf("%s holds no object of the gateway API groups", shown)
+	}
+	// A manifest taken from a cluster carries what a capture drops.
+	minimize(objs, false)
+	for i := range objs {
+		s.Objects = append(s.Objects, objs[i].Object)
+	}
+	return s, nil
+}
+
+// readDir reads every .yaml and .yml file under a folder as one manifest. A
+// folder of manifests also holds files that are not: a file that cannot be read
+// is skipped and named in a warning, and one without gateway objects is skipped
+// silently. Only the first definition of an object is kept, as a cluster holds
+// one; a snapshot in the folder is read for its objects alone.
+func readDir(dir string) (*Snapshot, error) {
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	// What a manifest does not say about itself; a snapshot's first document does.
-	s := &Snapshot{Meta: Meta{Context: filepath.Base(file), GeneratedAt: time.Now().UTC().Format(time.RFC3339)}}
-	isSnapshot := false
+	s := &Snapshot{Meta: Meta{Context: filepath.Base(abs), GeneratedAt: time.Now().UTC().Format(time.RFC3339)}}
+	// The walk does not follow a link, also when the folder itself is one.
+	if dir, err = filepath.EvalSymlinks(dir); err != nil {
+		return nil, err
+	}
 	var objs []unstructured.Unstructured
-	docs := utilyaml.NewYAMLReader(bufio.NewReader(f))
+	definedIn := map[string]string{}
+	err = filepath.WalkDir(dir, func(file string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if file != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir // .git and the like
+			}
+			return nil
+		}
+		if ext := filepath.Ext(file); ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, file)
+		// The reason is not the error itself: a YAML error quotes the file.
+		f, err := os.Open(file)
+		if err != nil {
+			s.Meta.Warnings = append(s.Meta.Warnings, rel+" was skipped: it could not be opened")
+			return nil
+		}
+		found, _, err := readManifest(f)
+		f.Close()
+		if err != nil {
+			s.Meta.Warnings = append(s.Meta.Warnings, rel+" was skipped: it is not valid YAML")
+			return nil
+		}
+		for _, o := range found {
+			key := o.GroupVersionKind().Group + "/" + o.GetKind() + "/" + o.GetNamespace() + "/" + o.GetName()
+			if first, dup := definedIn[key]; dup && o.GetName() != "" {
+				s.Meta.Warnings = append(s.Meta.Warnings, fmt.Sprintf("%s: %s %s/%s is already defined in %s, this copy was skipped", rel, o.GetKind(), o.GetNamespace(), o.GetName(), first))
+				continue
+			}
+			definedIn[key] = rel
+			objs = append(objs, o)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(objs) == 0 {
+		return nil, fmt.Errorf("%s holds no object of the gateway API groups in its .yaml and .yml files", dir)
+	}
+	minimize(objs, false)
+	for i := range objs {
+		s.Objects = append(s.Objects, objs[i].Object)
+	}
+	return s, nil
+}
+
+// readManifest returns the objects of the gateway API groups in a
+// multi-document YAML stream, and the Meta of its snapshot document if it has
+// one. Like a capture, it keeps nothing else, so a Secret or a ConfigMap in the
+// stream is never read further.
+func readManifest(in io.Reader) (objs []unstructured.Unstructured, head *Meta, err error) {
+	docs := utilyaml.NewYAMLReader(bufio.NewReader(in))
 	for {
 		raw, err := docs.Read()
 		if err == io.EOF {
-			break
+			return objs, head, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, nil, err
 		}
 		var doc map[string]any
 		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			return nil, fmt.Errorf("%s: %w", file, err)
+			return nil, nil, err
 		}
 		items := []any{doc}
 		switch doc["kind"] {
 		case snapshotKind:
-			var head snapshotHead
-			if err := yaml.Unmarshal(raw, &head); err != nil {
-				return nil, fmt.Errorf("%s: %w", file, err)
+			var h snapshotHead
+			if err := yaml.Unmarshal(raw, &h); err != nil {
+				return nil, nil, err
 			}
-			s.Meta, isSnapshot = head.Meta, true
+			head = &h.Meta
 			continue
 		case "List":
 			items, _ = doc["items"].([]any)
@@ -292,15 +395,52 @@ func readSnapshot(file string) (*Snapshot, error) {
 			}
 		}
 	}
-	if !isSnapshot && len(objs) == 0 {
-		return nil, fmt.Errorf("%s holds no object of the gateway API groups", file)
+}
+
+func isURL(src string) bool {
+	return strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "http://")
+}
+
+// maxFetch is the largest file -from downloads.
+const maxFetch = 32 << 20
+
+// fetch downloads the file at a URL. It also returns the URL without its query
+// and credentials, which is the only form that is printed or kept: the link to
+// a file in a private repository can carry a token.
+func fetch(src string) (body []byte, shown string, err error) {
+	u, err := url.Parse(src)
+	if err != nil || u.Host == "" {
+		return nil, "", fmt.Errorf("-from: not a valid URL")
 	}
-	// A manifest taken from a cluster carries what a capture drops.
-	minimize(objs, false)
-	for i := range objs {
-		s.Objects = append(s.Objects, objs[i].Object)
+	shown = (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+	req, err := http.NewRequest(http.MethodGet, src, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("-from: not a valid URL")
 	}
-	return s, nil
+	req.Header.Set("User-Agent", "agwmap")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err // without the URL as it was given
+		}
+		return nil, "", fmt.Errorf("%s: %w", shown, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("%s: %s", shown, resp.Status)
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+		return nil, "", fmt.Errorf("%s is a web page, not a YAML file: use the link to the raw file", shown)
+	}
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxFetch+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", shown, err)
+	}
+	if len(body) > maxFetch {
+		return nil, "", fmt.Errorf("%s is larger than %d MiB", shown, maxFetch>>20)
+	}
+	return body, shown, nil
 }
 
 func capture(o options) (*Snapshot, error) {
