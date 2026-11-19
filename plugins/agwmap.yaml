@@ -3,7 +3,7 @@ kind: Plugin
 metadata:
   name: agwmap
 spec:
-  version: v0.3.0
+  version: v0.4.0
   homepage: https://github.com/paurosello/agwmap
   shortDescription: Map a cluster's gateway configuration in one HTML page
   description: |
@@ -20,34 +20,34 @@ spec:
       matchLabels:
         os: darwin
         arch: arm64
-    uri: https://github.com/paurosello/agwmap/releases/download/v0.3.0/agwmap_darwin_arm64.tar.gz
-    sha256: 8c2f8233401f292b75598e39a1dd8f481d201743b5a304950f1bb75aec618232
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.4.0/agwmap_darwin_arm64.tar.gz
+    sha256: a73ff6a6897f91e98ad990a96f1995fd2c8ae83210d4fa2b4c1fd87d389df627
     bin: kubectl-agwmap
   - selector:
       matchLabels:
         os: darwin
         arch: amd64
-    uri: https://github.com/paurosello/agwmap/releases/download/v0.3.0/agwmap_darwin_amd64.tar.gz
-    sha256: c89b1f7038675edeb902095f7150cf6687ca0d21c0c72f7452fd098ab332db12
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.4.0/agwmap_darwin_amd64.tar.gz
+    sha256: ea6405ddacdb253b02a133791452a7a9511b11ac27cb83ba18a3b53e6e1355a1
     bin: kubectl-agwmap
   - selector:
       matchLabels:
         os: linux
         arch: amd64
-    uri: https://github.com/paurosello/agwmap/releases/download/v0.3.0/agwmap_linux_amd64.tar.gz
-    sha256: 02c9ebe6b5e7d1adff5da6c41a8e069c1f32ce96023bd9c856dc65c90b9d6a73
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.4.0/agwmap_linux_amd64.tar.gz
+    sha256: 5599c2c27cf93dcc0c2eca7c60682e009b11894a09bd8b330bf0b3603f872cb6
     bin: kubectl-agwmap
   - selector:
       matchLabels:
         os: linux
         arch: arm64
-    uri: https://github.com/paurosello/agwmap/releases/download/v0.3.0/agwmap_linux_arm64.tar.gz
-    sha256: efe5c0685d6dc3e38795aec476ea41bc252acb13433e815fea3a686b4ebd1fc4
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.4.0/agwmap_linux_arm64.tar.gz
+    sha256: 05f0779e650be37d2a6088df0bdd8f8ed7434b1e66966a11cf30e8c628d3bd50
     bin: kubectl-agwmap
   - selector:
       matchLabels:
         os: windows
         arch: amd64
-    uri: https://github.com/paurosello/agwmap/releases/download/v0.3.0/agwmap_windows_amd64.tar.gz
-    sha256: cd98cc6a72c83747a71b9054f294553853027ad9cee9224a0946ef53f080a89e
+    uri: https://github.com/paurosello/agwmap/releases/download/v0.4.0/agwmap_windows_amd64.tar.gz
+    sha256: 48ec51ac00f5a04d7a2bba152d6390c8cd0ac75437820412d2c92b2b858e35b8
     bin: kubectl-agwmap.exe
