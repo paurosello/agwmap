@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -60,6 +61,8 @@ func collect(ctx context.Context, cfg *rest.Config, namespace string) ([]unstruc
 	}
 
 	var objs []unstructured.Unstructured
+	// Someone who may only read their own namespace gets nothing from all of them.
+	refused, namespaced := false, 0
 	for _, l := range lists {
 		gv, err := schema.ParseGroupVersion(l.GroupVersion)
 		if err != nil {
@@ -79,7 +82,11 @@ func collect(ctx context.Context, cfg *rest.Config, namespace string) ([]unstruc
 				page, err := ri.List(ctx, opts)
 				if err != nil {
 					warnings = append(warnings, fmt.Sprintf("could not list %s.%s: %v", r.Name, gv.Group, err))
+					refused = refused || (r.Namespaced && namespace == "" && apierrors.IsForbidden(err))
 					break
+				}
+				if r.Namespaced {
+					namespaced += len(page.Items)
 				}
 				objs = append(objs, page.Items...)
 				if page.GetContinue() == "" {
@@ -88,6 +95,9 @@ func collect(ctx context.Context, cfg *rest.Config, namespace string) ([]unstruc
 				opts.Continue = page.GetContinue()
 			}
 		}
+	}
+	if refused && namespaced == 0 {
+		warnings = append(warnings, "nothing could be read across all namespaces: to read a namespace you have access to, use -n NAMESPACE")
 	}
 	return objs, warnings, nil
 }

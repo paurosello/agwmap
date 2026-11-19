@@ -660,10 +660,21 @@ func TestNamespaceOfATenant(t *testing.T) {
 	c := newCluster(t)
 	c.only = "tenant-app"
 
+	// Without -n nothing is readable, and the output says what to do about it.
+	_, stderr, code := agwmap(t, c.kubeconfig, "-o", filepath.Join(t.TempDir(), "all.yaml"))
+	if code != 0 || !strings.Contains(stderr, "use -n NAMESPACE") {
+		t.Errorf("all namespaces: exit %d, stderr without the hint to use -n:\n%s", code, stderr)
+	}
+
 	page := out(t, c.kubeconfig, "tenant.html", "-n", "tenant-app")
 	g := graphOf(t, page)
 	if g.Meta.Namespace != "tenant-app" {
 		t.Errorf("meta.namespace = %q: the page cannot tell that only one namespace was read", g.Meta.Namespace)
+	}
+	for _, w := range g.Meta.Warnings {
+		if strings.Contains(w, "use -n") {
+			t.Errorf("the hint to use -n is given with -n: %q", w)
+		}
 	}
 	nodes := map[string]*Node{}
 	var captured []string

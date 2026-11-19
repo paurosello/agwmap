@@ -98,7 +98,8 @@ out and named in a warning at the top of the page.
 ### One namespace
 
 `-n` is for someone who may only read their own namespace, under a gateway that another team runs:
-`kubectl agwmap -n team-a`.
+`kubectl agwmap -n team-a`. Without it agwmap reads all namespaces, and says to use `-n` when it
+is allowed none of that.
 
 The page then shows the request flow as far as that namespace knows it:
 
