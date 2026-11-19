@@ -57,6 +57,8 @@ type cluster struct {
 	*httptest.Server
 	kubeconfig string
 	objects    int // how many objects a capture of all namespaces returns
+	// When set, the user may only list in this namespace: every other list is refused.
+	only string
 
 	mu       sync.Mutex
 	requests []string
@@ -184,7 +186,7 @@ func newCluster(t *testing.T) *cluster {
 		case (len(parts) == 4 || len(parts) == 6 && parts[3] == "namespaces") && parts[0] == "apis" &&
 			groups[parts[1]][parts[2]][parts[len(parts)-1]] != nil:
 			name := parts[len(parts)-1]
-			if name == forbidden {
+			if name == forbidden || (c.only != "" && (len(parts) == 4 || parts[4] != c.only)) {
 				msg := fmt.Sprintf(`%s.%s is forbidden: User "jane.doe@leak-corp.com" cannot list resource %q in API group %q at the cluster scope`,
 					name, parts[1], name, parts[1])
 				reply(w, 403, map[string]any{"kind": "Status", "apiVersion": "v1", "status": "Failure",
@@ -780,6 +782,86 @@ func TestNamespace(t *testing.T) {
 		"GatewayClass": 1, "EnterpriseAgentgatewayRoleBinding": 1, "XMesh": 1}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Errorf("kinds = %v, want %v", kinds, want)
+	}
+}
+
+// Someone who may only read their own namespace, under a gateway that a platform
+// team runs in another one: the gateway is known only as what their objects name.
+func TestNamespaceOfATenant(t *testing.T) {
+	c := newCluster(t)
+	c.only = "tenant-app"
+
+	// Without -n nothing is readable, and the output says what to do about it.
+	_, stderr, code := agwmap(t, c.kubeconfig, "-o", filepath.Join(t.TempDir(), "all.yaml"))
+	if code != 0 || !strings.Contains(stderr, "use -n NAMESPACE") {
+		t.Errorf("all namespaces: exit %d, stderr without the hint to use -n:\n%s", code, stderr)
+	}
+
+	page := out(t, c.kubeconfig, "tenant.html", "-n", "tenant-app")
+	g := graphOf(t, page)
+	if g.Meta.Namespace != "tenant-app" {
+		t.Errorf("meta.namespace = %q: the page cannot tell that only one namespace was read", g.Meta.Namespace)
+	}
+	for _, w := range g.Meta.Warnings {
+		if strings.Contains(w, "use -n") {
+			t.Errorf("the hint to use -n is given with -n: %q", w)
+		}
+	}
+	nodes := map[string]*Node{}
+	var captured []string
+	for _, n := range g.Nodes {
+		nodes[n.ID] = n
+		if !n.External {
+			captured = append(captured, n.Kind+" "+n.Namespace+"/"+n.Name)
+		}
+	}
+	// Every object of the namespace, and none of the gateway's or of another team's.
+	if want := []string{"AgentgatewayBackend tenant-app/spare", "AgentgatewayPolicy tenant-app/orders-timeout",
+		"HTTPRoute tenant-app/catalog", "HTTPRoute tenant-app/lost", "HTTPRoute tenant-app/orders", "HTTPRoute tenant-app/reports",
+		"ListenerSet tenant-app/app", "ReferenceGrant tenant-app/platform-to-reports"}; !reflect.DeepEqual(captured, want) {
+		t.Errorf("captured %v, want %v", captured, want)
+	}
+	const gwapi = "gateway.networking.k8s.io"
+	gw := nodes[gwapi+"/Gateway/tenant-platform/shared"]
+	if gw == nil || !gw.External {
+		t.Fatalf("the platform's gateway: %+v, want a stub", gw)
+	}
+	// What the page draws the flows from: the listener set and the routes that name the gateway.
+	parents, targeted := map[string]string{}, false
+	for _, e := range g.Edges {
+		targeted = targeted || (e.Type == "target" && e.From == "agentgateway.dev/AgentgatewayPolicy/tenant-app/orders-timeout" && e.To == gwapi+"/HTTPRoute/tenant-app/orders")
+		if e.Type == "parent" {
+			parents[e.From+" -> "+e.To] = e.Section
+		}
+		// The grant for search is in tenant-data, which was not read.
+		if strings.HasSuffix(e.To, "/Service/tenant-data/search") && (!e.CrossNS || e.Grant != "") {
+			t.Errorf("catalog -> search: %+v, want cross-namespace without a grant", e)
+		}
+	}
+	want := map[string]string{
+		gwapi + "/ListenerSet/tenant-app/app -> " + gw.ID:                                  "",
+		gwapi + "/HTTPRoute/tenant-app/catalog -> " + gw.ID:                                "https",
+		gwapi + "/HTTPRoute/tenant-app/lost -> " + gw.ID:                                   "internal",
+		gwapi + "/HTTPRoute/tenant-app/orders -> " + gwapi + "/ListenerSet/tenant-app/app": "orders",
+	}
+	if !reflect.DeepEqual(parents, want) {
+		t.Errorf("parent edges = %v, want %v", parents, want)
+	}
+	if !targeted {
+		t.Error("the policy orders-timeout is not attached to the route orders")
+	}
+	// The route's status is all the tenant sees of the gateway: it must survive the capture.
+	if route := nodes[gwapi+"/HTTPRoute/tenant-app/catalog"]; route == nil {
+		t.Error("the route catalog was not captured")
+	} else if status, _ := route.Obj["status"].(map[string]any); len(status) == 0 || status["parents"] == nil {
+		t.Errorf("status of catalog = %v, want its parents", status)
+	}
+
+	// A snapshot carries the namespace, so the page rendered from it is the same view.
+	snap := out(t, c.kubeconfig, "tenant.yaml", "-n", "tenant-app")
+	from := graphOf(t, mustRun(t, c.kubeconfig, "-from", write(t, "tenant.yaml", snap), "-o", "-"))
+	if from.Meta.Namespace != "tenant-app" || !reflect.DeepEqual(shape(from), shape(g)) {
+		t.Errorf("the page from the snapshot differs: namespace %q\n%s", from.Meta.Namespace, diff(shape(g), shape(from)))
 	}
 }
 

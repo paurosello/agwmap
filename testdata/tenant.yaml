@@ -1,0 +1,124 @@
+# A gateway run by a platform team, and an application team that only reads its
+# own namespace (tenant-app): what `agwmap -n tenant-app` has to make sense of.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: shared, namespace: tenant-platform}
+spec:
+  gatewayClassName: gwdemo
+  allowedListeners: {namespaces: {from: All}}
+  listeners:
+  - {name: https, protocol: HTTPS, port: 443, hostname: "*.tenant.test", allowedRoutes: {namespaces: {from: All}}}
+---
+# On the gateway: the application team cannot see that it applies to its routes.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: shared-limits, namespace: tenant-platform}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: shared}]
+  traffic:
+    rateLimit: {local: [{requests: 100, unit: Minutes}]}
+---
+# Delegates a path to a route of the application team, which names no parent.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: reports-parent, namespace: tenant-platform}
+spec:
+  parentRefs: [{name: shared}]
+  hostnames: [reports.tenant.test]
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /reports}}]
+    backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: reports, namespace: tenant-app}]
+---
+# The application team adds a listener of its own to the shared gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: {name: app, namespace: tenant-app}
+spec:
+  parentRef: {name: shared, namespace: tenant-platform}
+  listeners:
+  - {name: orders, protocol: HTTP, port: 8080, hostname: orders.tenant.test}
+status:
+  conditions:
+  - {type: Accepted, status: "True", reason: Accepted}
+  - {type: Programmed, status: "True", reason: Programmed}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: orders, namespace: tenant-app}
+spec:
+  parentRefs: [{kind: ListenerSet, name: app, sectionName: orders}]
+  rules:
+  - backendRefs: [{name: orders, port: 8080}]
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: orders-timeout, namespace: tenant-app}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: orders}]
+  traffic:
+    timeouts: {request: 5s}
+---
+# Straight on a listener of the gateway, which only the route's status describes.
+# Its second backend is in another namespace; the grant for it is there too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: catalog, namespace: tenant-app}
+spec:
+  parentRefs: [{name: shared, namespace: tenant-platform, sectionName: https}]
+  hostnames: [catalog.tenant.test]
+  rules:
+  - backendRefs:
+    - {name: catalog, port: 8080}
+    - {name: search, namespace: tenant-data, port: 8080}
+status:
+  parents:
+  - parentRef: {group: gateway.networking.k8s.io, kind: Gateway, name: shared, namespace: tenant-platform, sectionName: https}
+    controllerName: agentgateway.dev/agentgateway
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted}
+    - {type: ResolvedRefs, status: "True", reason: ResolvedRefs}
+---
+# Names a listener the gateway does not have: only the status says so.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: lost, namespace: tenant-app}
+spec:
+  parentRefs: [{name: shared, namespace: tenant-platform, sectionName: internal}]
+  rules:
+  - backendRefs: [{name: catalog, port: 8080}]
+status:
+  parents:
+  - parentRef: {group: gateway.networking.k8s.io, kind: Gateway, name: shared, namespace: tenant-platform, sectionName: internal}
+    controllerName: agentgateway.dev/agentgateway
+    conditions:
+    - {type: Accepted, status: "False", reason: NoMatchingParent, message: no listener named internal}
+---
+# Reached through tenant-platform/reports-parent.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: reports, namespace: tenant-app}
+spec:
+  rules:
+  - backendRefs: [{name: reports, port: 8080}]
+---
+# Lets a route of the platform team reach a Service here: the route is out of sight.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: {name: platform-to-reports, namespace: tenant-app}
+spec:
+  from: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: tenant-platform}]
+  to: [{group: "", kind: Service, name: reports}]
+---
+# No route of the application team uses it; one of another namespace may.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: spare, namespace: tenant-app}
+spec:
+  static: {host: spare.tenant.test, port: 443}
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: {name: catalog-to-search, namespace: tenant-data}
+spec:
+  from: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: tenant-app}]
+  to: [{group: "", kind: Service, name: search}]

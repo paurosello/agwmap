@@ -76,7 +76,7 @@ Against a cluster, or a file:
 
 ```sh
 kubectl agwmap                                  # current kube context, anonymized, opened in the browser
-kubectl agwmap --context prod -n team-a -o a.html
+kubectl agwmap --context prod -n team-a -o a.html   # only the namespace you have access to
 kubectl agwmap -open=false                      # only write the page and print where
 kubectl agwmap -o snapshot.yaml                 # capture only, to send to someone
 kubectl agwmap -from snapshot.yaml -o a.html    # render a capture you received
@@ -91,7 +91,7 @@ The binary works the same under any name, for example `agwmap -o a.html`.
 | Flag | What it does |
 |---|---|
 | `--context`, `--kubeconfig` | Which cluster to read. Default: the current context. |
-| `-n`, `--namespace` | Read one namespace. Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
+| `-n`, `--namespace` | Read one namespace: see [one namespace](#one-namespace). Default: all namespaces (`-A` is accepted too). Cluster-scoped objects are always read. |
 | `-o` | Output file. Default: a new `agwmap-*.html` in the temp folder, readable only by you. `-` writes the page to stdout. A name ending in `.yaml` writes a snapshot instead of the page. |
 | `-open=false` | Do not open the page in the default browser. It is opened only when stderr is a terminal, so pipelines and CI jobs never open one. |
 | `-from` | Render a YAML file instead of reading a cluster: a snapshot, or any manifest of gateway objects. Takes a local file, a folder or a URL. |
@@ -105,6 +105,29 @@ when stderr is not a terminal.
 
 agwmap needs permission to list the objects of the gateway API groups. A kind it may not list is left
 out and named in a warning at the top of the page.
+
+### One namespace
+
+`-n` is for someone who may only read their own namespace, under a gateway that another team runs:
+`kubectl agwmap -n team-a`. Without it agwmap reads all namespaces, and says to use `-n` when it
+is allowed none of that.
+
+The page then shows the request flow as far as that namespace knows it:
+
+| In the namespace | Not on the page |
+|---|---|
+| Your routes, their rules, backends and the policies attached to them | The gateway, when it is in another namespace: its listeners, its class, and the policies attached to it, which apply to your routes too |
+| Your ListenerSet: its listeners in full, and whether the gateway accepted it | Other routes on the same listener or hostname, and a route in another namespace that delegates to yours |
+| What the gateway's controller reports on each route (`Accepted`, `ResolvedRefs`), per parent | A ReferenceGrant in the namespace of a backend you refer to, and the backend itself |
+
+A gateway that was not read still starts the flow: it is drawn from what your objects say about it.
+A route that goes through your ListenerSet shows that listener; a route attached straight to the
+gateway shows the listener it names, and what the controller reports for it. Nothing that is merely
+out of sight is flagged as wrong: a backend in another namespace reads "ReferenceGrant not visible",
+not "no ReferenceGrant". A route without a parent is listed under "No parent in this namespace".
+
+Cluster-scoped kinds such as GatewayClass are still asked for, so expect a warning for each one you
+may not list.
 
 A snapshot is a multi-document YAML manifest: one document of kind `agwmap-snapshot` that says where
 and when it was captured, whether it is anonymized and what could not be read, then one document per
@@ -216,6 +239,8 @@ With `-anonymize=false` nothing is replaced and all labels and annotations are k
 
 - Kubernetes objects only: a standalone agentgateway config file is not read.
 - One cluster per page.
+- A page of [one namespace](#one-namespace) cannot show what a gateway or a policy in another
+  namespace does to its requests.
 - When the same setting is configured at several levels, the page shows all of them but does not work
   out which one takes effect.
 
