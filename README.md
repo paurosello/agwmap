@@ -236,7 +236,7 @@ With anonymization, which is the default:
 |---|---|
 | Hostnames, wherever they appear, and IPv4 and IPv6 addresses | Names and namespaces of the objects |
 | URLs: the host, path segments other than well-known words such as `/v1` or `/oauth2`, the query string | Names of what they refer to: Secrets, Services, models |
-| E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
+| E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids, storage bucket names, Bedrock guardrail ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
 | Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
 | Every value of the config of a native plugin (`entPlugin.config`): only its keys are kept | Plugin names, and the path and tag of a plugin image (its registry is a hostname) |
 | Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |

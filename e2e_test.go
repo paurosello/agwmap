@@ -50,6 +50,7 @@ var leaks = []string{
 	"123456789012", "2600:1f18", "203.0.113.77", // account id, addresses
 	"jane.doe",                                           // the user named in a "forbidden" warning
 	"search.hairpin", "tickets.hairpin", "repos.hairpin", // hairpin.yaml: Services that nothing names
+	"fld-batch-jobs", "fld-guard", "beta.fld", // fields.yaml: a storage bucket, a Bedrock guardrail, a Service that nothing names
 }
 
 // cluster is the fake API server.
