@@ -3,7 +3,8 @@ name: release-please
 # Keeps a "chore(main): release X.Y.Z" pull request open with the next version
 # and its CHANGELOG.md section, worked out from the Conventional Commits merged
 # since the last release. Merging that pull request tags the release, and the
-# release workflow then builds and attaches the archives and updates krew.
+# release workflow then builds and attaches the archives and has krew-release-bot
+# bump the version in kubernetes-sigs/krew-index.
 on:
   push:
     branches: [main]
@@ -29,7 +30,6 @@ jobs:
     if: needs.release-please.outputs.release_created == 'true'
     permissions:
       contents: write
-      pull-requests: write
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
