@@ -1085,3 +1085,12 @@ func TestConfigMapReferences(t *testing.T) {
 		}
 	}
 }
+
+// Batch inference of an LLM backend is one of its settings.
+func TestBatchBackend(t *testing.T) {
+	nodes, _ := fieldsGraph(t)
+	n := nodes["enterpriseagentgateway.solo.io/EnterpriseAgentgatewayBackend/fld/pantry"]
+	if n == nil || !slices.Contains(n.Features, Feature{Category: "connection", Key: "entBatch", Path: "spec.entBatch"}) {
+		t.Errorf("the batch setting of pantry is not a feature: %+v", n)
+	}
+}

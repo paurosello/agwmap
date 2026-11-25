@@ -163,6 +163,10 @@ func nodeFor(u *unstructured.Unstructured) *Node {
 		if p, ok := spec["policies"].(map[string]any); ok {
 			n.Features = features(p, "spec.policies", "")
 		}
+		// Batch inference (enterprise): the OpenAI batch API, served by a provider's batch service.
+		if _, ok := spec["entBatch"].(map[string]any); ok {
+			n.Features = append(n.Features, Feature{Category: categories["entBatch"], Key: "entBatch", Path: "spec.entBatch"})
+		}
 	}
 	n.Plugins = append(mountedPlugins(spec), enabledPlugins(spec)...)
 	return n
@@ -821,6 +825,7 @@ var categories = map[string]string{
 	"extProc": "extension", "entPlugin": "extension",
 
 	"http": "connection", "tcp": "connection", "connect": "connection", "tunnel": "connection",
+	"entBatch": "connection",
 }
 
 func features(m map[string]any, path, prefix string) []Feature {

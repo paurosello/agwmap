@@ -306,6 +306,8 @@ function targetsOf(b) {
     for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";
       out.push({name: p.name || k, where: [k, p[k] && p[k].model, p[k] && p[k].region, p.host].filter(Boolean).join(" · "), proto: p._group ? `LLM · priority ${p._group}` : "LLM"}); }
   }
+  for (const [k, v] of Object.entries(s.entBatch || {})) // the OpenAI batch API, through the provider's batch service
+    out.push({name: "batch", where: [k, v && v.bucket && "bucket " + v.bucket].filter(Boolean).join(" · "), proto: "OpenAI batch API", batch: true});
   if (s.static) out.push({name: "static", where: host(s.static), proto: "HTTP", addr: addr(s.static)});
   if (s.a2a) out.push({name: "a2a", where: host(s.a2a), proto: "A2A", addr: addr(s.a2a)});
   for (const [k, v] of Object.entries(s.aws || {})) // agentCore: runtime ARN, region, account
@@ -597,7 +599,7 @@ function summaryHtml(e, gwPols) {
       for (const {b, weight} of list) {
         if (b.role === "route") { route(b, depth + 2, seen); continue; }
         count.backends.add(b.id);
-        const ts = b.external ? [] : targetsOf(b).filter(t => t.name !== "settings"), pols = polsOn(b.id);
+        const ts = b.external ? [] : targetsOf(b).filter(t => t.name !== "settings" && !t.batch), pols = polsOn(b.id);
         const mcp = ts.filter(t => t.mcp), what = mcp.length ? `MCP · ${mcp.length} target${mcp.length > 1 ? "s" : ""}` : ts.length === 1 ? ts[0].proto : ts.length && ts.every(t => t.proto.startsWith("LLM")) ? `LLM · ${ts.length} providers` : ts.length ? `${ts.length} targets` : "";
         const own = doing([...pols.filter(x => !x.section || !ts.some(t => t.name === x.section)), {p: b}]);
         line(depth + 2, `${nm(b)}${what ? ` <span class="mut">${esc(what)}</span>` : ""}${weight !== undefined && list.length > 1 ? ` <span class="badge">weight ${esc(weight)}</span>` : ""}${continues(b)}${words(own)}`);

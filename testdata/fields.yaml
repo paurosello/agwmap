@@ -56,6 +56,8 @@ spec:
   rules:
   - matches: [{path: {value: /mcp}}]
     backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: catalog}]
+  - matches: [{path: {value: /v1}}]
+    backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: pantry}]
   - backendRefs: [{name: menu, port: 8080}]
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -164,3 +166,18 @@ spec:
       configMap: {name: waf-crs-settings, namespace: fld, keys: [crs.conf]}
   customDirectives:
   - configMap: {name: waf-menu-rules, namespace: fld-infra, keys: [menu.conf]}
+---
+# LLM providers in priority groups, and the OpenAI batch API served by Bedrock.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: pantry, namespace: fld}
+spec:
+  ai:
+    groups:
+    - providers:
+      - name: first
+        openai: {model: gpt-4o-mini}
+      - name: second
+        bedrock: {model: claude-sonnet, region: eu-west-1}
+  entBatch:
+    bedrock: {bucket: fld-batch-jobs, roleArn: "arn:aws:iam::000000000000:role/fld-batch"}

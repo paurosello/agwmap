@@ -215,7 +215,7 @@ Checked against Solo Enterprise for agentgateway v2026.11.1-patch.0.
 | AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
 | AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
 | EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings. A native plugin it turns on (`traffic.entPlugin`, also `conditional`) shows its instance name, library, order and config keys, and is flagged when the gateway does not mount its library |
-| EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend |
+| EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend, with the batch inference it serves (`entBatch`) as a row and a Connection setting |
 | EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it, with the ConfigMap of its model catalog and the native plugins it mounts (`spec.plugins`: image or Secret); a plugin that no policy turns on for the gateway is flagged |
 | EnterpriseAgentgatewayBudget | `enterpriseagentgateway.solo.io` | Under the policy that enforces it |
 | EnterpriseAgentgatewayExternalSecret | `enterpriseagentgateway.solo.io` | Under the object that refers to it |
