@@ -176,7 +176,7 @@ kind (`v1beta1`, `v1alpha2`, `v1alpha3`) are read the same way.
 | Kind | Group | In the map |
 |---|---|---|
 | GatewayClass | `gateway.networking.k8s.io` | Under the gateway that uses it, with its parameters and the policies attached to it |
-| Gateway | `gateway.networking.k8s.io` | Start of a flow, one per listener: protocol, port, hostname, TLS, certificates, the listener's status |
+| Gateway | `gateway.networking.k8s.io` | Start of a flow, one per listener: protocol, port, hostname, TLS with its certificates and options, the client certificate validation and the certificate presented to backends that the gateway sets (`spec.tls`), the listener's status |
 | ListenerSet | `gateway.networking.k8s.io` | Adds its listeners to the parent gateway; flagged when the gateway's `allowedListeners` does not admit it |
 | XListenerSet | `gateway.networking.x-k8s.io` | The same (Gateway API v1.3 and v1.4) |
 | HTTPRoute | `gateway.networking.k8s.io` | Route: hostnames, per rule the matches, filters, timeouts, retry and backends with weight and port |

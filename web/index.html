@@ -620,6 +620,14 @@ function summaryHtml(e, gwPols) {
   return `<div class="summary"><div class="sh"><b>Summary</b><span class="mut">${esc(head)}</span><label><input type="checkbox" class="showcfg"${showConfig ? " checked" : ""}> show settings</label></div>${lines.join("")}</div>`;
 }
 
+// The client certificate validation (mTLS) a gateway sets for a listener that handles
+// HTTPS (spec.tls.frontend): the entry for the listener's port, or else the default.
+function clientValidation(gw, l) {
+  const f = get(spec(gw), "tls.frontend");
+  if (!f || l.protocol !== "HTTPS") return "";
+  const own = (f.perPort || []).find(p => p.port === l.port), v = own ? get(own, "tls.validation") : get(f, "default.validation");
+  return v ? [v.mode || "AllowValidOnly", "CA " + (v.caCertificateRefs || []).map(c => c.name).join(", "), own ? `port ${l.port}` : "gateway default"].join(" · ") : "";
+}
 function flowHtml(e) {
   const r = e.r, {l, via} = e.le || {}, cls = e.gw && outE(e.gw.id).find(x => x.type === "class");
   const gwPols = e.gw ? [...polsOn(e.gw.id).filter(x => !x.section || (!via && x.section === l.name)),
@@ -630,7 +638,10 @@ function flowHtml(e) {
   if (e.gw) {
     const lkv = l.unread ? kv([["listener", l.name || "not named by the route: every listener of the gateway that takes it"], ["port", l.port]])
       : kv([["listener", l.name], ["protocol", `${l.protocol} :${l.port}`], ["hostname", l.hostname || "*"],
-      ["tls", l.tls ? [l.tls.mode || "Terminate", (l.tls.certificateRefs || []).map(c => c.name).join(", ")].filter(Boolean).join(" · ") : ""], ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
+      ["tls", l.tls ? [l.tls.mode || "Terminate", (l.tls.certificateRefs || []).map(c => c.name).join(", "),
+        Object.entries(l.tls.options || {}).map(x => x.join("=")).join(", ")].filter(Boolean).join(" · ") : ""],
+      ["client validation", clientValidation(e.gw, l)], ["client cert to backends", get(spec(e.gw), "tls.backend.clientCertificateRef.name")],
+      ["allowed routes", get(l, "allowedRoutes.namespaces.from")]]);
     // A gateway that was not read: what its controller reports on the listener set or the
     // route that names it is all there is to know about it.
     const away = !e.gw.external ? "" : kv([
