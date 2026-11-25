@@ -295,9 +295,12 @@ function targetsOf(b) {
     : `${x.host || x.unixPath || ""}${x.port ? ":" + x.port : ""}${x.path || ""}`; };
   // where a target sends the request, to find out whether that is a gateway again
   const addr = t => { const x = st(t); return {host: x.backendRef ? `${x.backendRef.name}.${x.backendRef.namespace || b.ns}.svc` : x.host, port: x.port, path: x.path}; };
+  // a composed tool: its steps call tools or HTTP endpoints of other backends
+  const custom = c => { const steps = c.steps || [], to = [...new Set(steps.flatMap(x => [get(x, "http.backendRef"), get(x, "mcp.backendRef")]).filter(Boolean).map(r => `${r.kind || "Service"}/${r.name}`))];
+    return `custom tool · ${steps.length} step${steps.length === 1 ? "" : "s"}${to.length ? " → " + to.join(", ") : ""}`; };
   for (const k of ["mcp", "entMcp"]) for (const t of (s[k] && s[k].targets) || [])
-    out.push({name: t.name, where: t.selector ? "services selected by label" : host(t), proto: (t.static && t.static.protocol) || "MCP",
-      mcp: true, inline: Object.keys(st(t).policies || {}), condition: t.condition, addr: t.selector ? null : addr(t)});
+    out.push({name: t.name, where: t.selector ? "services selected by label" : t.custom ? custom(t.custom) : host(t), proto: (t.static && t.static.protocol) || "MCP",
+      mcp: true, inline: Object.keys(st(t).policies || {}), condition: t.condition, addr: t.selector || t.custom ? null : addr(t)});
   if (s.ai) {
     const provs = s.ai.provider ? [s.ai.provider] : (s.ai.groups || []).flatMap((g, i) => (g.providers || []).map(p => ({...p, _group: i + 1})));
     for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";

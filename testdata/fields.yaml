@@ -95,6 +95,17 @@ spec:
     - name: beta
       condition: request.headers["x-beta"] == "on"
       static: {host: beta.fld.svc.cluster.local, port: 8080}
+    # A composed tool that calls an HTTP endpoint and a tool of other backends.
+    - name: reorder
+      custom:
+        description: Reorders the last order
+        inputSchema: {type: object}
+        output: "{{ steps.place.result }}"
+        steps:
+        - name: last
+          http: {backendRef: {group: "", kind: Service, name: orders, port: 8080}, method: GET, path: /orders/last}
+        - name: place
+          mcp: {tool: place_order, backendRef: {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: kitchen}}
 ---
 apiVersion: enterpriseagentgateway.solo.io/v1alpha1
 kind: EnterpriseAgentgatewayExternalSecret
