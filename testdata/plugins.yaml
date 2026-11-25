@@ -1,0 +1,116 @@
+# Native plugins of Solo Enterprise for agentgateway: libraries that parameters
+# mount (from an OCI image or a Secret), and policy instances that turn them on.
+# - the class mounts stamp and authz; the gateway mounts authz too, which wins
+# - the gateway mounts authz (image), hello (Secret) and spare, which nothing runs
+# - ghost is turned on for a route, but no parameters mount it
+# The plugin config holds strings that the anonymized capture must not keep.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata: {name: plug}
+spec:
+  controllerName: solo.io/enterprise-agentgateway
+  parametersRef:
+    group: enterpriseagentgateway.solo.io
+    kind: EnterpriseAgentgatewayParameters
+    name: plug-defaults
+    namespace: plug
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: plug-defaults, namespace: plug}
+spec:
+  plugins:
+  - name: stamp
+    image: registry.leak-corp.com/gw-plugins/stamp:v3
+  - name: authz
+    image: registry.leak-corp.com/gw-plugins/authz:v1
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: plug-gw, namespace: plug}
+spec:
+  plugins:
+  - name: authz
+    image: registry.leak-corp.com/gw-plugins/authz:v2
+    pullPolicy: IfNotPresent
+  - name: hello
+    secretRef:
+      name: hello-lib
+      items:
+      - {key: libhello.so, path: libhello.so}
+  - name: spare
+    image: registry.leak-corp.com/gw-plugins/spare:v1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: plugged, namespace: plug}
+spec:
+  gatewayClassName: plug
+  infrastructure:
+    parametersRef:
+      group: enterpriseagentgateway.solo.io
+      kind: EnterpriseAgentgatewayParameters
+      name: plug-gw
+  listeners:
+  - {name: http, port: 80, protocol: HTTP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: orders, namespace: plug}
+spec:
+  parentRefs: [{name: plugged}]
+  rules:
+  - backendRefs: [{name: orders, port: 8080}]
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: authz, namespace: plug}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: plugged}
+  traffic:
+    entPlugin:
+      name: authz
+      order: PostAuthorization
+      config:
+        resultHeader: x-authz-result
+        policy: |
+          package gw
+          allow if input.headers["x-team"] == "leak-corp-admins"
+        upstream: {kind: Service, name: plugin-config-only, url: "https://opa.leak-corp.com/v1?k=leak-query-secret"}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: stamp, namespace: plug}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: plugged}
+  traffic:
+    entPlugin: {name: stamp, order: Early}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: tenant-hello, namespace: plug}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: orders}
+  traffic:
+    entPlugin:
+      conditional:
+      - condition: request.headers["x-tenant"] == "blue"
+        policy:
+          name: tenant-hello
+          plugin: hello
+          config: {greeting: sk-leakleakleakleakleak0001}
+      - policy:
+          name: tenant-hello
+          plugin: hello
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: ghost, namespace: plug}
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: orders}
+  traffic:
+    entPlugin: {name: ghost, order: Late, config: {mode: ghostly-mode-value}}

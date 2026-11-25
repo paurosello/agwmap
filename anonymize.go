@@ -26,6 +26,8 @@ import (
 //   - inline credentials: values of secret-like keys and headers, bearer and
 //     basic tokens, JWTs, API keys with a known prefix, PEM blocks
 //   - gRPC service names in route matches
+//   - every value of the config of a native plugin (entPlugin.config): only
+//     its keys are kept
 //   - label and annotation values, by the same rules
 //
 // In-cluster service hostnames are replaced too (svc-1.ns-1.svc.cluster.local),
@@ -157,6 +159,36 @@ func anonymize(objs []unstructured.Unstructured) *anonymizer {
 		}
 		return key(&objs[i]) < key(&objs[j])
 	})
+	// The config of a native plugin is opaque: no rule can tell its credentials
+	// from the rest, so every value goes and only the keys stay.
+	// Every config under entPlugin, also in a shape the API would refuse: -from
+	// reads manifests that no API server checked.
+	var plugin func(v any)
+	plugin = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, c := range t {
+				if k != "config" {
+					plugin(c)
+				} else if m, ok := c.(map[string]any); ok {
+					for ck := range m {
+						m[ck] = redacted
+					}
+				} else {
+					t[k] = redacted
+				}
+			}
+		case []any:
+			for _, c := range t {
+				plugin(c)
+			}
+		}
+	}
+	for i := range objs {
+		if traffic, ok := objs[i].Object["spec"].(map[string]any)["traffic"].(map[string]any); ok {
+			plugin(traffic["entPlugin"])
+		}
+	}
 	a := &anonymizer{pseudo: map[string]string{}, count: map[string]int{}, hosts: map[string]bool{}, named: namedServices(objs)}
 	// The second pass replaces hostnames that the first one only learned about
 	// later, or met in a place where nothing marks them as a host.

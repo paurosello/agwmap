@@ -1,6 +1,8 @@
 package main
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +37,35 @@ type Node struct {
 	Role      string         `json:"role"` // class, gateway, route, backend, policy, params, other, external
 	External  bool           `json:"external,omitempty"`
 	Features  []Feature      `json:"features,omitempty"`
+	Plugins   []Plugin       `json:"plugins,omitempty"`
 	Obj       map[string]any `json:"obj,omitempty"`
+}
+
+// Plugin is a native plugin of Solo Enterprise for agentgateway: a library that
+// parameters mount into the proxy (spec.plugins), or one instance of it that a
+// policy turns on (spec.traffic.entPlugin). Of the configuration of an instance
+// only the keys are kept: what a plugin is configured with is opaque and can be
+// a credential.
+type Plugin struct {
+	Name string `json:"name"` // parameters: the library name; policy: the instance name
+	Path string `json:"path"` // where in the object it is defined
+
+	// A policy's instance.
+	Library   string   `json:"library,omitempty"`   // the mounted library it runs: plugin, or else name
+	Order     string   `json:"order,omitempty"`     // where in the request policy chain; empty is Late
+	Condition string   `json:"condition,omitempty"` // the CEL condition of a conditional entry
+	Fallback  bool     `json:"fallback,omitempty"`  // a conditional entry without a condition
+	Config    []string `json:"config,omitempty"`    // the keys of its config, never the values
+	// Gateways this instance applies to whose mounted plugins do not include its library.
+	Unmounted []string `json:"unmounted,omitempty"`
+
+	// A library that parameters mount.
+	Image      string   `json:"image,omitempty"` // OCI image, mounted as an image volume
+	PullPolicy string   `json:"pullPolicy,omitempty"`
+	Secret     string   `json:"secret,omitempty"` // or a Secret in the proxy's namespace
+	Keys       []string `json:"keys,omitempty"`   // the keys of that Secret it mounts; none means all
+	// Gateways that mount this library and on which no policy turns it on.
+	Unused []string `json:"unused,omitempty"`
 }
 
 // Feature is one capability a policy (or a backend's inline policy) configures.
@@ -90,6 +120,7 @@ func buildGraph(objs []unstructured.Unstructured) *Graph {
 		b.link(n)
 	}
 	b.grants()
+	b.plugins()
 
 	// Empty slices, not nil: the page iterates both, and nil would be JSON null.
 	g := &Graph{Nodes: []*Node{}, Edges: append([]Edge{}, b.edges...)}
@@ -133,7 +164,85 @@ func nodeFor(u *unstructured.Unstructured) *Node {
 			n.Features = features(p, "spec.policies", "")
 		}
 	}
+	n.Plugins = append(mountedPlugins(spec), enabledPlugins(spec)...)
 	return n
+}
+
+// mountedPlugins reads spec.plugins of a parameters object.
+func mountedPlugins(spec map[string]any) []Plugin {
+	list, _ := spec["plugins"].([]any)
+	var out []Plugin
+	for i, it := range list {
+		m, _ := it.(map[string]any)
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		p := Plugin{Name: name, Path: "spec.plugins." + strconv.Itoa(i)}
+		p.Image, _ = m["image"].(string)
+		p.PullPolicy, _ = m["pullPolicy"].(string)
+		p.Secret, _, _ = unstructured.NestedString(m, "secretRef", "name")
+		items, _, _ := unstructured.NestedSlice(m, "secretRef", "items")
+		for _, it := range items {
+			if k, _ := it.(map[string]any)["key"].(string); k != "" {
+				p.Keys = append(p.Keys, k)
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+type pluginEntry struct {
+	m         map[string]any
+	path      string
+	condition string
+	fallback  bool
+}
+
+func pluginEntries(spec map[string]any) []pluginEntry {
+	traffic, _ := spec["traffic"].(map[string]any)
+	ep, _ := traffic["entPlugin"].(map[string]any)
+	if ep == nil {
+		return nil
+	}
+	const at = "spec.traffic.entPlugin"
+	cond, ok := ep["conditional"].([]any)
+	if !ok {
+		return []pluginEntry{{m: ep, path: at}}
+	}
+	var out []pluginEntry
+	for i, c := range cond {
+		m, _ := c.(map[string]any)
+		pol, _ := m["policy"].(map[string]any)
+		if pol == nil {
+			continue
+		}
+		e := pluginEntry{m: pol, path: at + ".conditional." + strconv.Itoa(i) + ".policy"}
+		e.condition, _ = m["condition"].(string)
+		e.fallback = e.condition == ""
+		out = append(out, e)
+	}
+	return out
+}
+
+// enabledPlugins reads the plugin instances that a policy turns on.
+func enabledPlugins(spec map[string]any) []Plugin {
+	var out []Plugin
+	for _, e := range pluginEntries(spec) {
+		name, _ := e.m["name"].(string)
+		lib, _ := e.m["plugin"].(string)
+		if lib == "" {
+			lib = name
+		}
+		p := Plugin{Name: name, Path: e.path, Library: lib, Condition: e.condition, Fallback: e.fallback}
+		p.Order, _ = e.m["order"].(string)
+		if c, ok := e.m["config"].(map[string]any); ok {
+			p.Config = slices.Sorted(maps.Keys(c))
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func roleOf(kind string, spec map[string]any) string {
@@ -328,6 +437,144 @@ func (b *builder) grants() {
 	}
 }
 
+// plugins checks native plugins per gateway. A gateway mounts the plugins of its
+// own parameters and those of its class's, its own winning for the same name. A
+// policy on the gateway, on one of its listener sets or on a route that reaches
+// it turns an instance on, which runs a library by name. An instance whose
+// library the gateway does not mount fails its requests (503); a mounted library
+// that no instance runs is dead weight. Each policy instance gets a plugin edge
+// to the parameters that mount its library.
+//
+// A gateway whose mounts are not all visible (it, its class or a parameters
+// object was not captured) is not checked: what was not read is not wrong.
+func (b *builder) plugins() {
+	out, in := map[string][]Edge{}, map[string][]Edge{}
+	for _, e := range b.edges {
+		out[e.From] = append(out[e.From], e)
+		in[e.To] = append(in[e.To], e)
+	}
+	// The gateways an object reaches: a gateway itself, the parent of a listener
+	// set, the gateways of a route's parents, or of a route that delegates to it.
+	var gatewaysOf func(n *Node, seen map[string]bool) []*Node
+	gatewaysOf = func(n *Node, seen map[string]bool) []*Node {
+		if seen[n.ID] {
+			return nil
+		}
+		seen[n.ID] = true
+		switch n.Role {
+		case "gateway":
+			return []*Node{n}
+		case "listenerset", "route":
+		default:
+			return nil
+		}
+		var gws []*Node
+		for _, e := range out[n.ID] {
+			if e.Type == "parent" {
+				gws = append(gws, gatewaysOf(b.nodes[e.To], seen)...)
+			}
+		}
+		for _, e := range in[n.ID] {
+			if e.Type == "backend" && b.nodes[e.From].Role == "route" {
+				gws = append(gws, gatewaysOf(b.nodes[e.From], seen)...)
+			}
+		}
+		return gws
+	}
+	type mount struct {
+		params *Node
+		i      int
+	}
+	// The libraries a gateway mounts, and whether every place they come from was read.
+	mounts := func(g *Node) (map[string]mount, bool) {
+		m := map[string]mount{}
+		add := func(from *Node) bool {
+			for _, e := range out[from.ID] {
+				if e.Type != "params" {
+					continue
+				}
+				p := b.nodes[e.To]
+				if p.External {
+					return false
+				}
+				for i, pl := range p.Plugins {
+					if _, ok := m[pl.Name]; !ok && pl.Library == "" {
+						m[pl.Name] = mount{p, i}
+					}
+				}
+			}
+			return true
+		}
+		if g.External || !add(g) {
+			return nil, false
+		}
+		for _, e := range out[g.ID] {
+			if e.Type == "class" && (b.nodes[e.To].External || !add(b.nodes[e.To])) {
+				return nil, false
+			}
+		}
+		return m, true
+	}
+
+	gws := slices.Clone(b.byKind["Gateway"])
+	sort.Slice(gws, func(i, j int) bool { return gws[i].ID < gws[j].ID })
+	used := map[*Node]map[string]bool{} // gateway -> libraries some instance runs
+	var pols []*Node
+	for _, n := range b.nodes {
+		if n.Role == "policy" && !n.External && len(n.Plugins) > 0 {
+			pols = append(pols, n)
+		}
+	}
+	sort.Slice(pols, func(i, j int) bool { return pols[i].ID < pols[j].ID })
+	for _, p := range pols {
+		var reach []*Node
+		seen := map[string]bool{}
+		for _, e := range out[p.ID] {
+			if e.Type == "target" {
+				for _, g := range gatewaysOf(b.nodes[e.To], map[string]bool{}) {
+					if !seen[g.ID] {
+						seen[g.ID] = true
+						reach = append(reach, g)
+					}
+				}
+			}
+		}
+		sort.Slice(reach, func(i, j int) bool { return reach[i].ID < reach[j].ID })
+		for _, g := range reach {
+			m, ok := mounts(g)
+			if !ok {
+				continue
+			}
+			if used[g] == nil {
+				used[g] = map[string]bool{}
+			}
+			for i := range p.Plugins {
+				pl := &p.Plugins[i]
+				mt, ok := m[pl.Library]
+				if !ok {
+					pl.Unmounted = append(pl.Unmounted, g.ID)
+					continue
+				}
+				used[g][pl.Library] = true
+				b.edge(Edge{From: p.ID, To: mt.params.ID, Type: "plugin", Section: pl.Library, Path: "spec.traffic.entPlugin"})
+			}
+		}
+	}
+	for _, g := range gws {
+		m, ok := mounts(g)
+		if !ok {
+			continue
+		}
+		for _, lib := range slices.Sorted(maps.Keys(m)) {
+			if !used[g][lib] {
+				mt := m[lib]
+				pl := &mt.params.Plugins[mt.i]
+				pl.Unused = append(pl.Unused, g.ID)
+			}
+		}
+	}
+}
+
 func grantMatches(list any, group, kind, ns, name string) bool {
 	items, _ := list.([]any)
 	for _, it := range items {
@@ -400,6 +647,10 @@ func (b *builder) walk(n *Node, v any, path []string) {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if k == "targetSelectors" {
+				continue
+			}
+			// The config of a plugin is opaque: what looks like a reference in it is not one.
+			if k == "config" && slices.Contains(path, "entPlugin") {
 				continue
 			}
 			// A Secret named by a plain string (elicitation.secretName).
