@@ -58,9 +58,12 @@ been tested yet.
 As a kubectl plugin, with [krew](https://krew.sigs.k8s.io/):
 
 ```sh
-kubectl krew index add agwmap https://github.com/paurosello/agwmap.git
-kubectl krew install agwmap/agwmap
+kubectl krew install agwmap
 ```
+
+If you installed it from the old `agwmap` custom index, which no longer gets new versions, switch to
+the default index with `kubectl krew uninstall agwmap && kubectl krew install agwmap`, then remove
+the old index with `kubectl krew index remove agwmap`.
 
 Or download the archive for your platform from the
 [releases](https://github.com/paurosello/agwmap/releases) and put `kubectl-agwmap` on your `PATH`.

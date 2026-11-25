@@ -1,0 +1,44 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: agwmap
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/paurosello/agwmap
+  shortDescription: Map the gateway configuration as an HTML page
+  description: |
+    Reads the Gateway API and agentgateway objects of a cluster and writes one
+    self-contained HTML page with the request flow of every route: listener,
+    policies at each level, route, backends and upstream targets.
+    Captures are anonymized by default and can be exported and rendered again.
+  platforms:
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    {{ addURIAndSha "https://github.com/paurosello/agwmap/releases/download/{{ .TagName }}/agwmap_darwin_arm64.tar.gz" .TagName }}
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{ addURIAndSha "https://github.com/paurosello/agwmap/releases/download/{{ .TagName }}/agwmap_darwin_amd64.tar.gz" .TagName }}
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{ addURIAndSha "https://github.com/paurosello/agwmap/releases/download/{{ .TagName }}/agwmap_linux_amd64.tar.gz" .TagName }}
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{ addURIAndSha "https://github.com/paurosello/agwmap/releases/download/{{ .TagName }}/agwmap_linux_arm64.tar.gz" .TagName }}
+    bin: kubectl-agwmap
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{ addURIAndSha "https://github.com/paurosello/agwmap/releases/download/{{ .TagName }}/agwmap_windows_amd64.tar.gz" .TagName }}
+    bin: kubectl-agwmap.exe
