@@ -191,8 +191,10 @@ kind (`v1beta1`, `v1alpha2`, `v1alpha3`) are read the same way.
 | XBackend | `gateway.networking.x-k8s.io` | Backend, with its hostname or pod selector |
 | XMesh | `gateway.networking.x-k8s.io` | Listed under "Outside the flow": it is not on a request path |
 
-A route attaches to a listener by section name, port, protocol, `allowedRoutes` and hostname. Routes
-can also be attached to a Service (mesh) or to another route (delegation).
+A route attaches to a listener by section name, port, protocol, `allowedRoutes` and hostname. A route
+with `useDefaultGateways` attaches to every gateway whose `defaultScope` is the same, which is marked
+"default gateway", and is then checked the same way. Routes can also be attached to a Service (mesh)
+or to another route (delegation).
 
 ### Inference extension
 

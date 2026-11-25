@@ -372,6 +372,7 @@ func (b *builder) link(n *Node) {
 		}
 	}
 	b.linkBudgets(n, spec)
+	b.linkDefaultGateways(n, spec)
 	if n.Kind == "ReferenceGrant" {
 		return // spec.to names what may be referred to, it is not a reference: see grants
 	}
@@ -400,6 +401,23 @@ func (b *builder) linkBudgets(n *Node, spec map[string]any) {
 				continue
 			}
 			b.edge(Edge{From: n.ID, To: c.ID, Type: "discovers", Path: "spec.traffic.entBudgetEnforcement", Note: note})
+		}
+	}
+}
+
+// linkDefaultGateways attaches a route that asks for the default gateways of a
+// scope (spec.useDefaultGateways, Gateway API experimental) to every gateway that
+// claims that scope (spec.defaultScope), in any namespace. Which listener takes it
+// is decided as for a parentRef without a sectionName.
+func (b *builder) linkDefaultGateways(n *Node, spec map[string]any) {
+	scope, _ := spec["useDefaultGateways"].(string)
+	if n.Role != "route" || scope == "" || scope == "None" {
+		return
+	}
+	for _, g := range b.byKind["Gateway"] {
+		gs, _, _ := unstructured.NestedString(g.Obj, "spec", "defaultScope")
+		if !g.External && gs == scope {
+			b.edge(Edge{From: n.ID, To: g.ID, Type: "parent", Path: "spec.useDefaultGateways", Note: "default gateway"})
 		}
 	}
 }

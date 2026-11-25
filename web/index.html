@@ -645,8 +645,12 @@ function flowHtml(e) {
     // A Gateway API ListenerSet is only taken by a gateway whose allowedListeners admits its namespace (default: none).
     const from = get(spec(e.gw), "allowedListeners.namespaces.from") || "None";
     const refused = via && !e.gw.external && /^gateway\.networking\.(x-)?k8s\.io$/.test(via.group) && !(from === "All" || from === "Selector" || (from === "Same" && via.ns === e.gw.ns));
+    // A default gateway (Gateway API experimental) also takes the routes that ask for its scope instead of naming it.
+    const scope = spec(e.gw).defaultScope, dflt = scope && scope !== "None" ? `<span class="badge go" title="spec.defaultScope ${esc(scope)}: routes with spec.useDefaultGateways ${esc(scope)} attach to this gateway without naming it">default gateway</span>` : "";
+    const byDefault = r && outE(r.id).some(x => x.type === "parent" && x.to === e.gw.id && x.path === "spec.useDefaultGateways")
+      ? `<span class="badge" title="The route names no parent here: it asks for the default gateways (spec.useDefaultGateways)">route attached by default</span>` : "";
     h += stage(i++, "gateway", "Client connects to the listener",
-      card(e.gw, (via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + away, via ? "" : lstatus) + refs(e.gw) +
+      card(e.gw, (via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + away, dflt + byDefault + (via ? "" : lstatus)) + refs(e.gw) +
       (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>${refused ? `<span class="badge bad" title="spec.allowedListeners of the gateway is ${esc(from)}: it does not take listeners from this ListenerSet">not allowed by the gateway's allowedListeners</span>` : ""}${lstatus}`) + refs(via)}</div>` : ""));
     h += stage(i++, "policy", "Policies attached to the gateway", e.gw.external
       ? polCards(gwPols) + `<div class="empty">Not visible: a policy on the gateway is in namespace ${esc(e.gw.ns)}, which was not read.</div>`

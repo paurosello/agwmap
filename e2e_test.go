@@ -604,6 +604,38 @@ spec:
 	}
 }
 
+// fields.yaml, rendered with -from: the edges and settings of fields that change
+// where a request goes.
+func fieldsGraph(t *testing.T) (map[string]*Node, map[string]Edge) {
+	t.Helper()
+	file, err := filepath.Abs("testdata/fields.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := graphOf(t, mustRun(t, "/nonexistent", "-from", file, "-o", "-"))
+	nodes, edges := map[string]*Node{}, map[string]Edge{}
+	for _, n := range g.Nodes {
+		nodes[n.ID] = n
+	}
+	for _, e := range g.Edges {
+		edges[e.From+" -> "+e.To+" "+e.Type] = e
+	}
+	return nodes, edges
+}
+
+func TestDefaultGateways(t *testing.T) {
+	_, edges := fieldsGraph(t)
+	const gw, rt = "gateway.networking.k8s.io/Gateway/fld-infra/", "gateway.networking.k8s.io/HTTPRoute/fld/"
+	if e, ok := edges[rt+"menu -> "+gw+"commons parent"]; !ok || e.Path != "spec.useDefaultGateways" {
+		t.Errorf("menu asks for the default gateways and is not attached to commons: %+v", e)
+	}
+	for _, k := range []string{rt + "menu -> " + gw + "closed parent", rt + "quiet -> " + gw + "commons parent"} {
+		if _, ok := edges[k]; ok {
+			t.Errorf("unexpected edge %s", k)
+		}
+	}
+}
+
 func diff(want, got []string) string {
 	var b strings.Builder
 	for _, s := range want {
