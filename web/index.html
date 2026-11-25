@@ -304,7 +304,9 @@ function targetsOf(b) {
   if (s.ai) {
     const provs = s.ai.provider ? [s.ai.provider] : (s.ai.groups || []).flatMap((g, i) => (g.providers || []).map(p => ({...p, _group: i + 1})));
     for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";
-      out.push({name: p.name || k, where: [k, p[k] && p[k].model, p[k] && p[k].region, p.host].filter(Boolean).join(" · "), proto: p._group ? `LLM · priority ${p._group}` : "LLM"}); }
+      // its own inline policies, and the guardrails of the provider's service (OpenAI moderation, a Bedrock guardrail)
+      const inline = [...Object.entries(p.policies || {}).flatMap(([x, v]) => x === "ai" && v ? Object.keys(v) : [x]), ...(p[k] && (p[k].moderation || p[k].guardrail) ? ["guardrails"] : [])];
+      out.push({name: p.name || k, where: [k, p[k] && p[k].model, p[k] && p[k].region, p.host].filter(Boolean).join(" · "), proto: p._group ? `LLM · priority ${p._group}` : "LLM", inline}); }
   }
   for (const [k, v] of Object.entries(s.entBatch || {})) // the OpenAI batch API, through the provider's batch service
     out.push({name: "batch", where: [k, v && v.bucket && "bucket " + v.bucket].filter(Boolean).join(" · "), proto: "OpenAI batch API", batch: true});
@@ -601,12 +603,12 @@ function summaryHtml(e, gwPols) {
         count.backends.add(b.id);
         const ts = b.external ? [] : targetsOf(b).filter(t => t.name !== "settings" && !t.batch), pols = polsOn(b.id);
         const mcp = ts.filter(t => t.mcp), what = mcp.length ? `MCP · ${mcp.length} target${mcp.length > 1 ? "s" : ""}` : ts.length === 1 ? ts[0].proto : ts.length && ts.every(t => t.proto.startsWith("LLM")) ? `LLM · ${ts.length} providers` : ts.length ? `${ts.length} targets` : "";
-        const own = doing([...pols.filter(x => !x.section || !ts.some(t => t.name === x.section)), {p: b}]);
+        const into = ts.map(t => intoGateway(t.addr)), alone = ts.length === 1 && !into[0]; // a lone target gets no line of its own
+        const own = [...new Set([...doing([...pols.filter(x => !x.section || !ts.some(t => t.name === x.section)), {p: b}]), ...(alone ? (ts[0].inline || []).map(said) : [])])];
         line(depth + 2, `${nm(b)}${what ? ` <span class="mut">${esc(what)}</span>` : ""}${weight !== undefined && list.length > 1 ? ` <span class="badge">weight ${esc(weight)}</span>` : ""}${continues(b)}${words(own)}`);
         // Several targets, or one that goes back into a gateway: one line each, with what is
         // attached to that target alone (sectionName), and the route it reaches there: only its
         // name and policies, its rules and backends are in the flow of that route.
-        const into = ts.map(t => intoGateway(t.addr));
         if (ts.length > 1 || into.some(Boolean)) ts.forEach((t, ti) => {
           const ws = [...doing(pols.filter(x => x.section === t.name)), ...(t.inline || []).map(said)], to = into[ti];
           if (t.mcp) { count.targets++; for (const w of ws) count.with.set(w, (count.with.get(w) || 0) + 1); }

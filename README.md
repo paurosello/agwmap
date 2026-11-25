@@ -211,7 +211,7 @@ Checked against Solo Enterprise for agentgateway v2026.11.1-patch.0.
 | Kind | Group | In the map |
 |---|---|---|
 | AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does, with its phase and inheritance (`strategy.inheritance`) as badges |
-| AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS. An MCP target with a condition is marked conditional; a custom MCP target (a composed tool) shows its number of steps and the backends they call |
+| AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS. An MCP target with a condition is marked conditional; a custom MCP target (a composed tool) shows its number of steps and the backends they call. In the summary, each LLM provider lists its own policies and its provider-side guardrails, on the line of the backend when it is the only one |
 | AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
 | AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
 | EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings. A native plugin it turns on (`traffic.entPlugin`, also `conditional`) shows its instance name, library, order and config keys, and is flagged when the gateway does not mount its library |

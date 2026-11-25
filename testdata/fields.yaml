@@ -58,6 +58,8 @@ spec:
     backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: catalog}]
   - matches: [{path: {value: /v1}}]
     backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: pantry}]
+  - matches: [{path: {value: /v2}}]
+    backendRefs: [{group: agentgateway.dev, kind: AgentgatewayBackend, name: larder}]
   - backendRefs: [{name: menu, port: 8080}]
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -176,8 +178,23 @@ spec:
     groups:
     - providers:
       - name: first
-        openai: {model: gpt-4o-mini}
+        openai: {model: gpt-4o-mini, moderation: {model: omni-moderation-latest}}
+        policies:
+          auth: {secretRef: {name: first-key}}
+          ai: {modelAliases: {fast: gpt-4o-mini}}
       - name: second
-        bedrock: {model: claude-sonnet, region: eu-west-1}
+        bedrock:
+          model: claude-sonnet
+          region: eu-west-1
+          guardrail: {identifier: fld-guard, version: "1"}
   entBatch:
     bedrock: {bucket: fld-batch-jobs, roleArn: "arn:aws:iam::000000000000:role/fld-batch"}
+---
+# One LLM provider, with the moderation of the provider's service.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: larder, namespace: fld}
+spec:
+  ai:
+    provider:
+      openai: {model: gpt-4o-mini, moderation: {model: omni-moderation-latest}}
