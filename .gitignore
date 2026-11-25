@@ -13,5 +13,6 @@ out/
 !/renovate.json
 !/release-please-config.json
 !/.release-please-manifest.json
+!/.krew.yaml
 
 .DS_Store

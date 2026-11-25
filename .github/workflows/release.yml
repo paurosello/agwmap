@@ -101,3 +101,15 @@ jobs:
             gh pr create --head release/krew --base main --title "$title" \
               --body "Points krew at ${TAG}. Merge it to make \`kubectl krew upgrade agwmap\` install the new version."
           fi
+
+      # Renders .krew.yaml for the tag (checksums from the archives uploaded
+      # above) and has krew-release-bot open the version bump pull request on
+      # kubernetes-sigs/krew-index. The tag is passed explicitly because
+      # GITHUB_REF is main when release-please calls this workflow. The image
+      # is used directly: the v0.0.51 action still runs the v0.0.50 image,
+      # which ignores the tag input. Last, so that a failure of the bot's
+      # webhook does not skip the steps above.
+      - name: Update the version in krew-index
+        uses: docker://ghcr.io/rajatjindal/krew-release-bot:v0.0.51
+        env:
+          INPUT_KREW_PLUGIN_RELEASE_TAG: ${{ env.TAG }}
