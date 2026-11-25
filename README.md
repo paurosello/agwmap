@@ -50,8 +50,7 @@ been tested yet.
 As a kubectl plugin, with [krew](https://krew.sigs.k8s.io/):
 
 ```sh
-kubectl krew index add agwmap https://github.com/paurosello/agwmap.git
-kubectl krew install agwmap/agwmap
+kubectl krew install agwmap
 ```
 
 Or download the archive for your platform from the

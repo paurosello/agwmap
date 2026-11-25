@@ -86,6 +86,9 @@ Merging that pull request is the release, so only the owner merges it. release-p
 workflow. That workflow tests, builds the archives, attaches them to the release, and opens a pull
 request `chore: update the krew manifest to vX.Y.Z` from the `release/krew` branch with the new
 `plugins/agwmap.yaml`. krew installs the new version once the owner merges that pull request.
+The same workflow also runs krew-release-bot, which renders `.krew.yaml` for the tag and opens the
+version bump pull request on kubernetes-sigs/krew-index; keep `.krew.yaml` and the manifest that
+`scripts/release.sh` writes in step.
 
 - Never edit `plugins/agwmap.yaml`, `CHANGELOG.md` or `.release-please-manifest.json` by hand, and
   never push a release tag yourself. To change what a release says, change the release pull request
