@@ -1049,3 +1049,22 @@ func TestReferenceKinds(t *testing.T) {
 		}
 	}
 }
+
+// Every setting of a policy is labelled by what it does: none falls to "other".
+func TestFeatureCategories(t *testing.T) {
+	nodes, _ := fieldsGraph(t)
+	for _, id := range []string{
+		"enterpriseagentgateway.solo.io/EnterpriseAgentgatewayPolicy/fld-infra/proof",
+		"gateway.networking.k8s.io/BackendTLSPolicy/fld/menu-tls",
+	} {
+		n := nodes[id]
+		if n == nil || len(n.Features) == 0 {
+			t.Fatalf("%s has no features", id)
+		}
+		for _, f := range n.Features {
+			if f.Category == "other" {
+				t.Errorf("%s: %s has no category", id, f.Key)
+			}
+		}
+	}
+}

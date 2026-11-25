@@ -118,3 +118,22 @@ spec:
         clientAuth:
           clientId: fld-client
           certificateKeyPairRef: {name: menu-client-cert}
+---
+# A gateway policy that traffic policies on its routes cannot override, with
+# a setting that was not labelled before; TLS options to a backend.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: proof, namespace: fld-infra}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: commons}]
+  strategy: {inheritance: Override}
+  traffic:
+    entWptEnforcement: {mode: RequireProof}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata: {name: menu-tls, namespace: fld}
+spec:
+  targetRefs: [{group: "", kind: Service, name: menu}]
+  validation: {hostname: menu.fld.svc.cluster.local, wellKnownCACertificates: System}
+  options: {example.com/min-version: "1.3"}

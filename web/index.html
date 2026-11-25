@@ -452,8 +452,8 @@ function crossBadge(e) {
 }
 const continues = o => { const g = gatewayBehind(o);
   return g ? `<span class="badge go" data-open="${esc(g.id)}" title="This Service has the name of a Gateway: it is that gateway's proxy, so the request goes on through it">continues at gateway ${esc(g.name)}</span>` : ""; };
-const polCards = (list, none) => list.length ? list.map(({p, section}) => { const ph = get(p.obj, "spec.traffic.phase");
-  return card(p, feats(p), (section ? `<span class="badge">#${esc(section)}</span>` : "") + (ph ? `<span class="badge go" title="spec.traffic.phase: when the traffic settings of this policy run">phase ${esc(ph)}</span>` : "")) + uses(p); }).join("") : none ? `<div class="empty">${none}</div>` : "";
+const polCards = (list, none) => list.length ? list.map(({p, section}) => { const ph = get(p.obj, "spec.traffic.phase"), inh = get(p.obj, "spec.strategy.inheritance");
+  return card(p, feats(p), (section ? `<span class="badge">#${esc(section)}</span>` : "") + (ph ? `<span class="badge go" title="spec.traffic.phase: when the traffic settings of this policy run">phase ${esc(ph)}</span>` : "") + (inh ? `<span class="badge go" title="spec.strategy.inheritance of the traffic settings. Override: traffic policies at more specific places (routes, rules) do not take part. Default: they can override this one">inheritance ${esc(inh)}</span>` : "")) + uses(p); }).join("") : none ? `<div class="empty">${none}</div>` : "";
 // The objects a card refers to. Captured ones become nested cards (an AuthConfig, a
 // budget, a WAF policy, a model), the rest (Secrets, Services) a line of chips.
 const USES = new Set(["ref", "params", "class", "discovers", "backend"]);

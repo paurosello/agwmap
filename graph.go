@@ -807,9 +807,10 @@ var categories = map[string]string{
 	"auth": "identity", "tokenExchange": "identity", "entTokenExchange": "identity",
 	"entConnector": "identity", "entCrossAppAccess": "identity", "entElicitation": "identity",
 	"workloadIdentity": "identity", "entAws": "identity",
+	"entWptEnforcement": "authn", // proof tokens of the calling workload
 
 	"tls": "security", "cors": "security", "csrf": "security", "proxyProtocol": "security",
-	"validation": "security",
+	"validation": "security", "options": "security", // BackendTLSPolicy
 
 	"tracing": "observability", "accessLog": "observability", "metrics": "observability",
 

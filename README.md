@@ -210,7 +210,7 @@ Checked against Solo Enterprise for agentgateway v2026.11.1-patch.0.
 
 | Kind | Group | In the map |
 |---|---|---|
-| AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does |
+| AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does, with its phase and inheritance (`strategy.inheritance`) as badges |
 | AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS. An MCP target with a condition is marked conditional |
 | AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
 | AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
