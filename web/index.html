@@ -657,9 +657,12 @@ function flowHtml(e) {
     // The listener's own status, and only the references of this listener (not the certificates of the others).
     const owner = via || e.gw, lbad = ((get(owner.obj, "status.listeners") || []).find(x => x.name === l.name) || {conditions: []}).conditions.filter(c => c.status !== "True");
     const lstatus = lbad.length ? `<span class="badge bad" title="${esc(lbad.map(c => `${c.type}: ${c.reason || ""} ${c.message || ""}`).join("\n"))}">✗ listener ${types(lbad)}</span>` : "";
-    const mine = o => { const li = o === owner ? (spec(o).listeners || []).indexOf(l) : -1;
-      return x => { const m = /^spec\.listeners\.(\d+)\./.exec(x.path || ""); return !m || +m[1] === li; }; };
+    // The references of this listener (not the certificates of the others); those of its filters are shown with them.
+    const li = (spec(owner).listeners || []).indexOf(l), at = `spec.listeners.${li}.filters.requests`;
+    const mine = o => x => { const m = /^spec\.listeners\.(\d+)\./.exec(x.path || ""); return !m || (o === owner && +m[1] === li && !x.path.startsWith(at + ".")); };
     const refs = o => uses(o, new Set([o.id]), mine(o));
+    // Filters on every request of the listener, before any route (Gateway API experimental).
+    const lfilters = l.unread ? "" : filtersHtml(owner, get(l, "filters.requests"), at);
     // A Gateway API ListenerSet is only taken by a gateway whose allowedListeners admits its namespace (default: none).
     const from = get(spec(e.gw), "allowedListeners.namespaces.from") || "None";
     const refused = via && !e.gw.external && /^gateway\.networking\.(x-)?k8s\.io$/.test(via.group) && !(from === "All" || from === "Selector" || (from === "Same" && via.ns === e.gw.ns));
@@ -668,8 +671,8 @@ function flowHtml(e) {
     const byDefault = r && outE(r.id).some(x => x.type === "parent" && x.to === e.gw.id && x.path === "spec.useDefaultGateways")
       ? `<span class="badge" title="The route names no parent here: it asks for the default gateways (spec.useDefaultGateways)">route attached by default</span>` : "";
     h += stage(i++, "gateway", "Client connects to the listener",
-      card(e.gw, (via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + away, dflt + byDefault + (via ? "" : lstatus)) + refs(e.gw) +
-      (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>${refused ? `<span class="badge bad" title="spec.allowedListeners of the gateway is ${esc(from)}: it does not take listeners from this ListenerSet">not allowed by the gateway's allowedListeners</span>` : ""}${lstatus}`) + refs(via)}</div>` : ""));
+      card(e.gw, (via ? kv([["class", spec(e.gw).gatewayClassName]]) : lkv) + away, dflt + byDefault + (via ? "" : lstatus)) + refs(e.gw) + (via ? "" : lfilters) +
+      (via ? `<div class="sub">${card(via, lkv, `<span class="badge">adds this listener to the gateway</span>${refused ? `<span class="badge bad" title="spec.allowedListeners of the gateway is ${esc(from)}: it does not take listeners from this ListenerSet">not allowed by the gateway's allowedListeners</span>` : ""}${lstatus}`) + refs(via) + lfilters}</div>` : ""));
     h += stage(i++, "policy", "Policies attached to the gateway", e.gw.external
       ? polCards(gwPols) + `<div class="empty">Not visible: a policy on the gateway is in namespace ${esc(e.gw.ns)}, which was not read.</div>`
       : polCards(gwPols, "None at gateway level."));

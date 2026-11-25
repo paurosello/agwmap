@@ -14,6 +14,7 @@ metadata: {name: commons, namespace: fld-infra}
 spec:
   gatewayClassName: fld
   defaultScope: All
+  allowedListeners: {namespaces: {from: Same}}
   tls:
     frontend:
       default:
@@ -32,6 +33,11 @@ spec:
     tls:
       certificateRefs: [{name: commons-cert}]
       options: {example.com/min-version: "1.3"}
+    # Checked on every request of the listener, before any route.
+    filters:
+      requests:
+      - type: ExternalAuth
+        externalAuth: {protocol: HTTP, backendRef: {name: door-check, port: 9001}, http: {path: /check}}
   - name: kiosk
     protocol: HTTPS
     port: 8443
@@ -39,6 +45,22 @@ spec:
     tls: {certificateRefs: [{name: commons-cert}]}
   - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
   - {name: inside, protocol: HTTP, port: 8080}
+---
+# A listener set whose listener has a filter of its own.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: {name: annex, namespace: fld-infra}
+spec:
+  parentRef: {name: commons}
+  listeners:
+  - name: annex
+    protocol: HTTP
+    port: 8081
+    allowedRoutes: {namespaces: {from: All}}
+    filters:
+      requests:
+      - type: ExtensionRef
+        extensionRef: {group: example.com, kind: Stamp, name: annex-stamp}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
