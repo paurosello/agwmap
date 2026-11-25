@@ -204,7 +204,7 @@ can also be attached to a Service (mesh) or to another route (delegation).
 
 ### agentgateway
 
-Checked against Solo Enterprise for agentgateway v2026.11.0.
+Checked against Solo Enterprise for agentgateway v2026.11.1-patch.0.
 
 | Kind | Group | In the map |
 |---|---|---|

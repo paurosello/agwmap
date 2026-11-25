@@ -108,7 +108,7 @@
           ]
         }
       },
-      "version": "v2026.11.0"
+      "version": "v2026.11.1-patch.0"
     },
     "gateway-api-experimental": {
       "crds": {
