@@ -1068,3 +1068,20 @@ func TestFeatureCategories(t *testing.T) {
 		}
 	}
 }
+
+// ConfigMaps named under a configMap key: the rules of a WAF policy, the model catalog of parameters.
+func TestConfigMapReferences(t *testing.T) {
+	_, edges := fieldsGraph(t)
+	const waf, params = "waf.solo.io/WAFPolicy/fld/menu-waf", "enterpriseagentgateway.solo.io/EnterpriseAgentgatewayParameters/fld/knobs"
+	for _, k := range []string{
+		waf + " -> /ConfigMap/fld/waf-engine-settings ref",
+		waf + " -> /ConfigMap/fld/waf-crs-settings ref",
+		waf + " -> /ConfigMap/fld-infra/waf-menu-rules ref",
+		params + " -> /ConfigMap/fld/model-prices ref",
+		"enterpriseagentgateway.solo.io/EnterpriseAgentgatewayPolicy/fld/guarded -> " + waf + " ref",
+	} {
+		if _, ok := edges[k]; !ok {
+			t.Errorf("no edge %s", k)
+		}
+	}
+}

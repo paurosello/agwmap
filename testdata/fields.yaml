@@ -76,6 +76,9 @@ spec:
   env:
   - name: LOG_FORMAT
     valueFrom: {configMapKeyRef: {name: proxy-settings, key: log-format}}
+  modelCatalog:
+    sources:
+    - configMap: {name: model-prices}
 ---
 apiVersion: enterpriseagentgateway.solo.io/v1alpha1
 kind: EnterpriseAgentgatewayBackend
@@ -108,7 +111,7 @@ metadata: {name: guarded, namespace: fld}
 spec:
   targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: menu}]
   traffic:
-    entWAF: {wafServerRef: {name: waf-engine, port: 9000}}
+    entWAF: {wafServerRef: {name: waf-engine, port: 9000}, wafPolicyRef: {name: menu-waf}}
   backend:
     entTokenExchange:
       entra:
@@ -137,3 +140,16 @@ spec:
   targetRefs: [{group: "", kind: Service, name: menu}]
   validation: {hostname: menu.fld.svc.cluster.local, wellKnownCACertificates: System}
   options: {example.com/min-version: "1.3"}
+---
+# WAF rules from ConfigMaps, named without a Ref key.
+apiVersion: waf.solo.io/v1alpha1
+kind: WAFPolicy
+metadata: {name: menu-waf, namespace: fld}
+spec:
+  ruleEngineSettings:
+    configMap: {name: waf-engine-settings, namespace: fld, keys: [engine.conf]}
+  coreRuleSet:
+    settings:
+      configMap: {name: waf-crs-settings, namespace: fld, keys: [crs.conf]}
+  customDirectives:
+  - configMap: {name: waf-menu-rules, namespace: fld-infra, keys: [menu.conf]}

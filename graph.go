@@ -698,6 +698,10 @@ func asRef(n *Node, m map[string]any, path []string) (ref, string, bool) {
 	isRefKey := strings.HasSuffix(key, "Ref") || strings.HasSuffix(key, "Refs")
 	kind, _ := m["kind"].(string)
 	group, hasGroup := m["group"].(string)
+	if key == "configMap" && kind == "" {
+		// The rules of a WAFPolicy, the model catalog of parameters: {name, namespace, keys}.
+		kind = "ConfigMap"
+	}
 	if kind == "" && !isRefKey {
 		return ref{}, "", false
 	}
