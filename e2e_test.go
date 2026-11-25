@@ -498,6 +498,112 @@ func TestGraph(t *testing.T) {
 	}
 }
 
+// Native plugins (plugins.yaml): what parameters mount, what policies turn on, and
+// the two mistakes between them. Of a plugin's config only the keys are kept.
+func TestPlugins(t *testing.T) {
+	c := newCluster(t)
+	page := out(t, c.kubeconfig, "map.html")
+	g := graphOf(t, page)
+	const (
+		params = "enterpriseagentgateway.solo.io/EnterpriseAgentgatewayParameters/plug/"
+		policy = "enterpriseagentgateway.solo.io/EnterpriseAgentgatewayPolicy/plug/"
+		gw     = "gateway.networking.k8s.io/Gateway/plug/plugged"
+	)
+	plugins := map[string][]Plugin{}
+	for _, n := range g.Nodes {
+		if strings.Contains(n.ID, "plugin-config-only") {
+			t.Errorf("a reference inside a plugin's config became a node: %s", n.ID)
+		}
+		plugins[n.ID] = n.Plugins
+	}
+	same := func(what string, got, want []Plugin) {
+		t.Helper()
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\n got  %+v\n want %+v", what, got, want)
+		}
+	}
+	// The image's registry is a hostname, and anonymized as one.
+	image := func(p Plugin) string { return p.Image[strings.Index(p.Image, "/"):] }
+	gwp := plugins[params+"plug-gw"]
+	if len(gwp) != 3 || image(gwp[0]) != "/gw-plugins/authz:v2" || image(gwp[2]) != "/gw-plugins/spare:v1" {
+		t.Fatalf("the gateway's parameters mount %+v", gwp)
+	}
+	gwp[0].Image, gwp[2].Image = "", ""
+	same("the gateway's parameters", gwp, []Plugin{
+		{Name: "authz", Path: "spec.plugins.0", PullPolicy: "IfNotPresent"},
+		{Name: "hello", Path: "spec.plugins.1", Secret: "hello-lib", Keys: []string{"libhello.so"}},
+		{Name: "spare", Path: "spec.plugins.2", Unused: []string{gw}}, // nothing turns it on
+	})
+	// The class mounts authz too, but the gateway's own entry wins: not reported as unused.
+	for _, p := range plugins[params+"plug-defaults"] {
+		if len(p.Unused) != 0 {
+			t.Errorf("class plugin %s reported unused: %+v", p.Name, p)
+		}
+	}
+	same("authz", plugins[policy+"authz"], []Plugin{{Name: "authz", Path: "spec.traffic.entPlugin", Library: "authz",
+		Order: "PostAuthorization", Config: []string{"policy", "resultHeader", "upstream"}}})
+	same("tenant-hello", plugins[policy+"tenant-hello"], []Plugin{
+		{Name: "tenant-hello", Path: "spec.traffic.entPlugin.conditional.0.policy", Library: "hello",
+			Condition: `request.headers["x-tenant"] == "blue"`, Config: []string{"greeting"}},
+		{Name: "tenant-hello", Path: "spec.traffic.entPlugin.conditional.1.policy", Library: "hello", Fallback: true},
+	})
+	// A route policy whose library no parameters of its gateway mount.
+	same("ghost", plugins[policy+"ghost"], []Plugin{{Name: "ghost", Path: "spec.traffic.entPlugin", Library: "ghost",
+		Order: "Late", Config: []string{"mode"}, Unmounted: []string{gw}}})
+
+	edges := map[string]bool{}
+	for _, e := range g.Edges {
+		if e.Type == "plugin" {
+			edges[e.From+" -> "+e.To+" #"+e.Section] = true
+		}
+	}
+	want := map[string]bool{
+		policy + "authz -> " + params + "plug-gw #authz":        true, // the gateway's, not the class's
+		policy + "stamp -> " + params + "plug-defaults #stamp":  true, // mounted by the class
+		policy + "tenant-hello -> " + params + "plug-gw #hello": true, // through the route
+	}
+	if !reflect.DeepEqual(edges, want) {
+		t.Errorf("plugin edges = %v, want %v", edges, want)
+	}
+
+	// The config's values are gone from what is shared, its keys stay.
+	snap := out(t, c.kubeconfig, "snapshot.yaml")
+	for _, s := range []string{"leak-corp-admins", "x-authz-result", "plugin-config-only", "ghostly-mode-value"} {
+		if strings.Contains(snap, s) || strings.Contains(page, s) {
+			t.Errorf("the capture keeps %q of a plugin's config", s)
+		}
+	}
+	if !strings.Contains(snap, "resultHeader: <redacted>") {
+		t.Error("the keys of a plugin's config are lost")
+	}
+	// Shapes the API refuses, which a manifest given to -from can still have: an
+	// inline config next to conditional, a config that is not an object.
+	odd := write(t, "odd.yaml", `apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: odd, namespace: plug}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: plugged}]
+  traffic:
+    entPlugin:
+      config: {token: odd-inline-value}
+      conditional:
+      - policy: {name: odd, config: odd-string-value}
+`)
+	for _, f := range []string{"odd.yaml", "odd.html"} {
+		got := out(t, "/nonexistent", f, "-from", odd)
+		if strings.Contains(got, "odd-inline-value") || strings.Contains(got, "odd-string-value") {
+			t.Errorf("%s keeps a value of a plugin's config", f)
+		}
+	}
+	// With -anonymize=false the object is kept as it is, and the graph still holds only the keys.
+	real := graphOf(t, out(t, c.kubeconfig, "real.html", "-anonymize=false"))
+	for _, n := range real.Nodes {
+		if n.ID == policy+"ghost" && (len(n.Plugins) != 1 || !reflect.DeepEqual(n.Plugins[0].Config, []string{"mode"})) {
+			t.Errorf("ghost, not anonymized: %+v", n.Plugins)
+		}
+	}
+}
+
 func diff(want, got []string) string {
 	var b strings.Builder
 	for _, s := range want {
@@ -779,7 +885,7 @@ func TestNamespace(t *testing.T) {
 	}
 	// The four objects of leaks.yaml, and what is cluster-scoped.
 	want := map[string]int{"Gateway": 1, "HTTPRoute": 1, "GRPCRoute": 1, "AgentgatewayPolicy": 1,
-		"GatewayClass": 1, "EnterpriseAgentgatewayRoleBinding": 1, "XMesh": 1}
+		"GatewayClass": 2, "EnterpriseAgentgatewayRoleBinding": 1, "XMesh": 1}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Errorf("kinds = %v, want %v", kinds, want)
 	}

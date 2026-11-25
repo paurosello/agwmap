@@ -405,13 +405,28 @@ const block = (v, label) => { const y = yaml(v, 0), lines = y.split("\n").length
 let sameSetting = null;
 const LEVEL = {G: "the gateway", R: "the route", B: "a backend"};
 // one configured setting: its category, its name and its value
+// Native plugins: the libraries parameters mount, and the instances policies turn on.
+// Of an instance's config only the keys are shown: what a plugin is configured with can be a credential.
+const gwNames = ids => ids.map(id => { const g = N.get(id); return g ? `${g.ns}/${g.name}` : id; }).join(", ");
+const mountedText = p => p.image ? `image ${p.image}${p.pullPolicy ? " · pull " + p.pullPolicy : ""}`
+  : `Secret ${p.secret}${(p.keys || []).length ? " · key " + p.keys.join(", ") : " · every key"}`;
+const instanceText = p => [`library ${p.library}`, `order ${p.order || "Late (default)"}`,
+  (p.config || []).length ? `config keys ${p.config.join(", ")}` : "no config", p.condition ? `when ${p.condition}` : p.fallback ? "otherwise" : ""].filter(Boolean).join(" · ");
+const pluginBadges = p => ((p.unused || []).length ? `<span class="badge${NS ? "" : " bad"}" title="This library is mounted into the proxy, and no policy${NS ? ` in ${esc(NS)}` : ""} turns on an instance of it for this gateway.${NS ? " A policy in a namespace that was not read may still turn it on." : ""}">no policy${NS ? ` in ${esc(NS)}` : ""} turns it on for ${esc(gwNames(p.unused))}</span>` : "")
+  + ((p.unmounted || []).length ? `<span class="badge bad" title="Requests this instance applies to fail with 503: neither the parameters of the gateway nor those of its class mount a library of this name (spec.plugins).">${esc(p.library)} not mounted on ${esc(gwNames(p.unmounted))}</span>` : "");
+const pluginRows = (list, text) => `<div class="kv">${list.map(p => `<span>${esc(p.name)}</span><span>${esc(text(p))} ${pluginBadges(p)}</span>`).join("")}</div>`;
+const mountedHtml = n => (n.plugins || []).length ? `<div class="feat"><div class="fh"><span class="tag" style="--c:var(--extension)">Plugins</span><b>mounted</b></div>${pluginRows(n.plugins, mountedText)}</div>` : "";
+// The key a setting is compared by across levels: a plugin instance overrides another of the same name only.
+const settingKey = (p, f) => f.key === "entPlugin" ? "entPlugin:" + [...new Set((p.plugins || []).map(x => x.name))].join(",") : f.key;
 function feature(src, f) {
   const v = get(src.obj, f.path);
   // The same setting configured elsewhere on this request path. Which one applies is not worked out here.
   // Only across levels: two backends of a route each having their own credentials is not an overlap.
-  const all = (sameSetting && sameSetting.get(f.key)) || [], own = all.find(x => x.p === src);
+  const all = (sameSetting && sameSetting.get(settingKey(src, f))) || [], own = all.find(x => x.p === src);
   const others = own ? all.filter(x => x.level !== own.level) : [];
   const also = others.length ? `<span class="badge also" title="The same setting is configured by more than one object on this request path. agwmap does not work out which one takes effect.">also set on ${esc(others.map(x => `${LEVEL[x.level]} by ${x.p.name}`).join(", "))}</span>` : "";
+  // Never the YAML of a plugin: its config can hold credentials.
+  if (f.key === "entPlugin") return `<div class="feat"><div class="fh">${tag(f)}<b>${esc(f.key)}</b>${also}</div>${(src.plugins || []).length ? pluginRows(src.plugins, instanceText) : `<div class="kv"><span>instance</span><span>none named</span></div>`}</div>`;
   if (v === null || typeof v !== "object") return `<div class="feat"><div class="fh">${tag(f)}<b>${esc(f.key)}</b><span class="sv">${esc(v)}</span>${also}</div></div>`;
   return `<div class="feat"><div class="fh">${tag(f)}<b>${esc(f.key)}</b>${also}</div>${block(v)}</div>`;
 }
@@ -457,7 +472,8 @@ function uses(n, seen = new Set([n.id]), only = null) {
     // A Service that policies are attached to (a timeout on an ext-auth Service): show them with it.
     else if (o.external) cards += card(o, "", `<span class="badge">${esc(where)}</span>${crossBadge(e)}${continues(o)}`) + `<div class="sub">${polCards(pols)}</div>`;
     // Infrastructure settings (class, parameters) are a title only: click for the details.
-    else if (o.role === "class" || o.role === "params") cards += card(o, "", `<span class="badge">${esc(where)}</span>`) + uses(o, seen);
+    // Of parameters, the plugins they mount are shown too.
+    else if (o.role === "class" || o.role === "params") cards += card(o, mountedHtml(o), `<span class="badge">${esc(where)}</span>`) + uses(o, seen);
     else cards += card(o, bodyOf(o) + uses(o, seen), `<span class="badge" title="${esc(e.path || "")}">${esc(e.type === "discovers" ? "discovered budget" : where)}</span>${e.note ? `<span class="badge" title="${esc(e.note)}">selector not evaluated</span>` : ""}${crossBadge(e)}`);
   }
   return (chips ? `<div class="uses"><span class="ct">refers to</span>${chips}</div>` : "") + (cards ? `<div class="sub">${cards}</div>` : "");
@@ -539,7 +555,7 @@ function rulesHtml(r, depth = 0) {
 function settingsOnPath(e, gwPols) {
   const m = new Map(), pols = id => polsOn(id).map(x => x.p);
   const add = (nodes, level) => { for (const p of nodes) for (const f of p.features || [])
-    if (!(m.get(f.key) || []).some(x => x.p === p)) push(m, f.key, {p, level}); };
+    if (!(m.get(settingKey(p, f)) || []).some(x => x.p === p)) push(m, settingKey(p, f), {p, level}); };
   add(gwPols.map(x => x.p), "G");
   const walk = (r, depth) => { add(pols(r.id), "R");
     for (const list of ruleBackends(r).values()) for (const {b} of list) {
@@ -557,7 +573,8 @@ try { showConfig = localStorage.getItem("agwmap.showConfig") !== "0"; } catch (_
 // A setting in words: entTokenExchange -> token exchange, mcp.authorization -> authorization.
 const said = k => k.replace(/^(ai|mcp)\./, "").replace(/^ent(?=[A-Z])/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
 // what the policies in a list do, each setting once
-const doing = list => [...new Set(list.flatMap(({p}) => (p.features || []).map(f => said(f.key))))];
+const doing = list => [...new Set(list.flatMap(({p}) => (p.features || []).flatMap(f =>
+  f.key === "entPlugin" && (p.plugins || []).length ? p.plugins.map(x => "plugin " + x.name) : [said(f.key)])))];
 const words = (ws, none = "") => ws.length ? ws.map(w => `<span class="does">${esc(w)}</span>`).join("") : none ? `<span class="mut">${none}</span>` : "";
 const nm = n => `<span class="nm" data-open="${esc(n.id)}"><span class="k">${esc(n.kind)}</span> ${esc(n.name)}</span>`;
 function summaryHtml(e, gwPols) {
@@ -789,6 +806,7 @@ function openDetail(id) {
       ${unread(n) && n.group ? `<p class="mut">This object is in namespace ${esc(n.ns)}, and only ${esc(NS)} was read: it is known here by what refers to it.</p>`
         : n.external ? `<p class="mut">This object is only referred to. agwmap does not capture ${esc(n.kind)} objects, so it may or may not exist.</p>` : ""}
       ${(n.features || []).length ? `<h3>Configures</h3><div class="feats">${n.features.map(f => `<span>${tag(f)} <span class="mono">${esc(f.key)}</span></span>`).join("")}</div>` : ""}
+      ${(n.plugins || []).length ? `<h3>Plugins</h3>${pluginRows(n.plugins, n.role === "policy" ? instanceText : mountedText)}` : ""}
       ${outE(id).length ? `<h3>Refers to</h3>${outE(id).map(e => rel(e, e.to, "→")).join("")}` : ""}
       ${inE(id).length ? `<h3>Referred to by</h3>${inE(id).map(e => rel(e, e.from, "←")).join("")}` : ""}
       ${condHtml ? `<h3>Status</h3>${condHtml}` : ""}

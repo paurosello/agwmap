@@ -29,6 +29,14 @@ It also points at what is wrong or unused. Objects with a failing status conditi
 cross-namespace references without a ReferenceGrant and settings configured at more than one level.
 Whatever no request reaches, such as a dangling policy or an unused backend, is listed in its own tab.
 
+On Solo Enterprise for agentgateway, the map shows the native plugins of each gateway: under its
+parameters (and those of its class) the libraries they mount, with the OCI image or the Secret and
+keys each comes from, and on the gateway and route policies each plugin instance they turn on, with
+the library it runs, its order and the keys of its config. The cards never show the values of that
+config, which can hold credentials, and an anonymized capture replaces them; with `-anonymize=false`
+they stay in the object, as the Raw tab shows. It flags an instance whose library the gateway does
+not mount, which fails its requests, and a mounted library that no policy turns on.
+
 The output is anonymized by default so that you can send it to someone. Hostnames, URLs, IP addresses,
 account and client ids and inline credentials are replaced with stable pseudonyms, and only gateway
 labels and annotations are kept. Object names and namespaces stay, because the map is unreadable
@@ -196,15 +204,17 @@ can also be attached to a Service (mesh) or to another route (delegation).
 
 ### agentgateway
 
+Checked against Solo Enterprise for agentgateway v2026.11.0.
+
 | Kind | Group | In the map |
 |---|---|---|
 | AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does |
 | AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS |
 | AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
 | AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
-| EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings |
+| EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings. A native plugin it turns on (`traffic.entPlugin`, also `conditional`) shows its instance name, library, order and config keys, and is flagged when the gateway does not mount its library |
 | EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend |
-| EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it |
+| EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it, with the native plugins it mounts (`spec.plugins`: image or Secret); a plugin that no policy turns on for the gateway is flagged |
 | EnterpriseAgentgatewayBudget | `enterpriseagentgateway.solo.io` | Under the policy that enforces it |
 | EnterpriseAgentgatewayExternalSecret | `enterpriseagentgateway.solo.io` | Under the object that refers to it |
 | EnterpriseAgentgatewayRBACPolicy, EnterpriseAgentgatewayRoleBinding | `enterpriseagentgateway.solo.io` | Listed under "Outside the flow": access to the management UI, not to traffic |
@@ -226,6 +236,7 @@ With anonymization, which is the default:
 | URLs: the host, path segments other than well-known words such as `/v1` or `/oauth2`, the query string | Names of what they refer to: Secrets, Services, models |
 | E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
 | Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
+| Every value of the config of a native plugin (`entPlugin.config`): only its keys are kept | Plugin names, and the path and tag of a plugin image (its registry is a hostname) |
 | Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |
 | The kube context name or the name of the folder `-from` read, and the user and server named in warnings | The paths, inside a folder that `-from` read, of the files named in its warnings |
 | | In-cluster hostnames (`name.namespace.svc`) of a captured Gateway's proxy Service or of a Service an object refers to, so that a target that goes back through a gateway can be followed |
