@@ -4,6 +4,13 @@ All notable changes to agwmap are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). From 0.1.0 on, each section is written by release-please
 from the [Conventional Commits](https://www.conventionalcommits.org/) merged into the release.
 
+## [0.5.0](https://github.com/paurosello/agwmap/compare/v0.4.0...v0.5.0) (2026-11-25)
+
+
+### Features
+
+* show the native plugins of Solo Enterprise for agentgateway ([#16](https://github.com/paurosello/agwmap/issues/16)) ([83291e7](https://github.com/paurosello/agwmap/commit/83291e7d4061a4375a12f252e14dc54a6a0ff674))
+
 ## [0.4.0](https://github.com/paurosello/agwmap/compare/v0.3.0...v0.4.0) (2026-11-19)
 
 
