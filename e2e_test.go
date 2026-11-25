@@ -1023,3 +1023,29 @@ func TestUsageErrors(t *testing.T) {
 		t.Error("-version prints nothing")
 	}
 }
+
+// References whose key does not name their kind, or names a wrong one.
+func TestReferenceKinds(t *testing.T) {
+	nodes, edges := fieldsGraph(t)
+	const ent = "enterpriseagentgateway.solo.io/"
+	for from, to := range map[string]string{
+		ent + "EnterpriseAgentgatewayParameters/fld/knobs": "/ConfigMap/fld/proxy-settings",
+		ent + "EnterpriseAgentgatewayBackend/fld/catalog":  "/ConfigMap/fld/orders-openapi",
+		ent + "EnterpriseAgentgatewayPolicy/fld/guarded":   "/Secret/fld/menu-client-cert",
+	} {
+		if _, ok := edges[from+" -> "+to+" ref"]; !ok {
+			t.Errorf("no ref edge %s -> %s", from, to)
+		}
+	}
+	if _, ok := edges[ent+"EnterpriseAgentgatewayPolicy/fld/guarded -> /Service/fld/waf-engine ref"]; !ok {
+		t.Error("the WAF server without a kind is not a Service")
+	}
+	for id, n := range nodes {
+		if n.External && slices.Contains([]string{"ConfigMapKey", "Schema", "Store", "CertificateKeyPair", "WafServer"}, n.Kind) {
+			t.Errorf("a reference became a node of a kind that does not exist: %s", id)
+		}
+		if n.External && n.Name == "team-vault" {
+			t.Errorf("the secret store of an external secret became a node: %s", id)
+		}
+	}
+}

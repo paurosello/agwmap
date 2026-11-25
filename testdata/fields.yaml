@@ -38,3 +38,52 @@ spec:
   useDefaultGateways: None
   rules:
   - backendRefs: [{name: quiet, port: 8080}]
+---
+# References whose key does not name their kind: an env var from a ConfigMap key,
+# the schema of an OpenAPI MCP target, a client certificate and a WAF server
+# without a kind. A secret store is not an object, so storeRef refers to nothing.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: knobs, namespace: fld}
+spec:
+  env:
+  - name: LOG_FORMAT
+    valueFrom: {configMapKeyRef: {name: proxy-settings, key: log-format}}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: catalog, namespace: fld}
+spec:
+  entMcp:
+    targets:
+    - name: orders
+      static:
+        host: orders.fld.svc.cluster.local
+        port: 8080
+        openAPI: {schemaRef: {name: orders-openapi}}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayExternalSecret
+metadata: {name: vault-key, namespace: fld}
+spec:
+  storeRef: {name: team-vault}
+  data:
+  - materializedKey: Authorization
+    remoteRef: {key: menu-api-key}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: guarded, namespace: fld}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: menu}]
+  traffic:
+    entWAF: {wafServerRef: {name: waf-engine, port: 9000}}
+  backend:
+    entTokenExchange:
+      entra:
+        tenantId: fld-tenant
+        scopes: [api://menu/.default]
+        backendRef: {name: entra-login, port: 443}
+        clientAuth:
+          clientId: fld-client
+          certificateKeyPairRef: {name: menu-client-cert}

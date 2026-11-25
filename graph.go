@@ -732,6 +732,23 @@ func asRef(n *Node, m map[string]any, path []string) (ref, string, bool) {
 		if kind == "" && n.Kind == "InferencePool" {
 			kind = "Service"
 		}
+	// Keys whose name does not say the kind, or says a wrong one.
+	case "configMapKeyRef", "schemaRef": // an env var from a ConfigMap key, the schema of an OpenAPI MCP target
+		if kind == "" {
+			kind = "ConfigMap"
+		}
+	case "certificateKeyPairRef": // without a group it can only be a Secret
+		if kind == "" {
+			kind = "Secret"
+		}
+	case "wafServerRef": // kind defaults to Service
+		if kind == "" {
+			kind = "Service"
+		}
+	case "storeRef": // an external secret store is defined in the Helm values, not as an object
+		if kind == "" {
+			return ref{}, "", false
+		}
 	}
 	if kind == "" {
 		// secretRef -> Secret, authConfigRef -> AuthConfig
