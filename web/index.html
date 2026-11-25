@@ -297,7 +297,7 @@ function targetsOf(b) {
   const addr = t => { const x = st(t); return {host: x.backendRef ? `${x.backendRef.name}.${x.backendRef.namespace || b.ns}.svc` : x.host, port: x.port, path: x.path}; };
   for (const k of ["mcp", "entMcp"]) for (const t of (s[k] && s[k].targets) || [])
     out.push({name: t.name, where: t.selector ? "services selected by label" : host(t), proto: (t.static && t.static.protocol) || "MCP",
-      mcp: true, inline: Object.keys(st(t).policies || {}), addr: t.selector ? null : addr(t)});
+      mcp: true, inline: Object.keys(st(t).policies || {}), condition: t.condition, addr: t.selector ? null : addr(t)});
   if (s.ai) {
     const provs = s.ai.provider ? [s.ai.provider] : (s.ai.groups || []).flatMap((g, i) => (g.providers || []).map(p => ({...p, _group: i + 1})));
     for (const p of provs) { const k = Object.keys(p).find(x => p[x] && typeof p[x] === "object" && x !== "policies") || "provider";
@@ -437,7 +437,7 @@ const backendBody = b => { const ts = b.external ? [] : targetsOf(b);
   // targets that go back into a captured gateway, with a link to where they land
   const back = ts.map(t => [t, intoGateway(t.addr)]).filter(x => x[1]).map(([t, to]) =>
     `<div class="uses"><span class="ct">${esc(t.name)} continues at</span><span class="chip" data-open="${esc(to.gw.id)}"><span class="k">Gateway</span> ${esc(to.gw.name)}${to.le ? ` <span class="k">#${esc(to.le.l.name)}</span>` : ""}</span>${to.r ? `<span class="chip" data-goto="${esc(flowKey(to))}" title="Show the flow of this route"><span class="k">${esc(to.r.kind)}</span> ${esc(to.r.name)}</span>` : `<span class="badge bad">${esc(intoText(to).replace(/^.* · /, ""))}</span>`}</div>`).join("");
-  return (ts.length ? kv(ts.map(t => [t.name, `${t.proto} · ${t.where}`])) : "") + back + feats(b); };
+  return (ts.length ? kv(ts.map(t => [t.name, `${t.proto} · ${t.where}${t.condition ? ` · only when ${t.condition}` : ""}`])) : "") + back + feats(b); };
 const bodyOf = n => n.role === "backend" ? backendBody(n) : (n.features || []).length ? feats(n) : specBlock(n);
 // A reference that leaves its namespace. Gateway API requires a ReferenceGrant for
 // route backends and listener certificates; for other references it is only noted.
@@ -606,7 +606,7 @@ function summaryHtml(e, gwPols) {
           const ws = [...doing(pols.filter(x => x.section === t.name)), ...(t.inline || []).map(said)], to = into[ti];
           if (t.mcp) { count.targets++; for (const w of ws) count.with.set(w, (count.with.get(w) || 0) + 1); }
           if (to) count.back++;
-          line(depth + 3, `<span class="mono">${esc(t.name)}</span> <span class="mut">${esc(t.where)}</span>${words(ws)}${to && !to.r ? `<span class="badge bad" data-open="${esc(to.gw.id)}">${esc(intoText(to))}</span>` : ""}`);
+          line(depth + 3, `<span class="mono">${esc(t.name)}</span> <span class="mut">${esc(t.where)}</span>${t.condition ? `<span class="badge" title="${esc(t.condition)}: the target is part of the MCP backend only for requests where this is true">conditional</span>` : ""}${words(ws)}${to && !to.r ? `<span class="badge bad" data-open="${esc(to.gw.id)}">${esc(intoText(to))}</span>` : ""}`);
           if (to && to.r) line(depth + 4, `<span class="nm" ${goto(to)}><span class="k">${esc(to.r.kind)}</span> ${esc(to.r.name)}</span>${words(doing(polsOn(to.r.id)))}`);
         });
       }

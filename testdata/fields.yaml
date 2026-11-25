@@ -54,6 +54,8 @@ metadata: {name: menu, namespace: fld}
 spec:
   useDefaultGateways: All
   rules:
+  - matches: [{path: {value: /mcp}}]
+    backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: catalog}]
   - backendRefs: [{name: menu, port: 8080}]
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -86,6 +88,10 @@ spec:
         host: orders.fld.svc.cluster.local
         port: 8080
         openAPI: {schemaRef: {name: orders-openapi}}
+    # Only for some requests (a CEL condition).
+    - name: beta
+      condition: request.headers["x-beta"] == "on"
+      static: {host: beta.fld.svc.cluster.local, port: 8080}
 ---
 apiVersion: enterpriseagentgateway.solo.io/v1alpha1
 kind: EnterpriseAgentgatewayExternalSecret
