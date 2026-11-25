@@ -163,6 +163,10 @@ func nodeFor(u *unstructured.Unstructured) *Node {
 		if p, ok := spec["policies"].(map[string]any); ok {
 			n.Features = features(p, "spec.policies", "")
 		}
+		// Batch inference (enterprise): the OpenAI batch API, served by a provider's batch service.
+		if _, ok := spec["entBatch"].(map[string]any); ok {
+			n.Features = append(n.Features, Feature{Category: categories["entBatch"], Key: "entBatch", Path: "spec.entBatch"})
+		}
 	}
 	n.Plugins = append(mountedPlugins(spec), enabledPlugins(spec)...)
 	return n
@@ -372,6 +376,7 @@ func (b *builder) link(n *Node) {
 		}
 	}
 	b.linkBudgets(n, spec)
+	b.linkDefaultGateways(n, spec)
 	if n.Kind == "ReferenceGrant" {
 		return // spec.to names what may be referred to, it is not a reference: see grants
 	}
@@ -400,6 +405,23 @@ func (b *builder) linkBudgets(n *Node, spec map[string]any) {
 				continue
 			}
 			b.edge(Edge{From: n.ID, To: c.ID, Type: "discovers", Path: "spec.traffic.entBudgetEnforcement", Note: note})
+		}
+	}
+}
+
+// linkDefaultGateways attaches a route that asks for the default gateways of a
+// scope (spec.useDefaultGateways, Gateway API experimental) to every gateway that
+// claims that scope (spec.defaultScope), in any namespace. Which listener takes it
+// is decided as for a parentRef without a sectionName.
+func (b *builder) linkDefaultGateways(n *Node, spec map[string]any) {
+	scope, _ := spec["useDefaultGateways"].(string)
+	if n.Role != "route" || scope == "" || scope == "None" {
+		return
+	}
+	for _, g := range b.byKind["Gateway"] {
+		gs, _, _ := unstructured.NestedString(g.Obj, "spec", "defaultScope")
+		if !g.External && gs == scope {
+			b.edge(Edge{From: n.ID, To: g.ID, Type: "parent", Path: "spec.useDefaultGateways", Note: "default gateway"})
 		}
 	}
 }
@@ -680,6 +702,10 @@ func asRef(n *Node, m map[string]any, path []string) (ref, string, bool) {
 	isRefKey := strings.HasSuffix(key, "Ref") || strings.HasSuffix(key, "Refs")
 	kind, _ := m["kind"].(string)
 	group, hasGroup := m["group"].(string)
+	if key == "configMap" && kind == "" {
+		// The rules of a WAFPolicy, the model catalog of parameters: {name, namespace, keys}.
+		kind = "ConfigMap"
+	}
 	if kind == "" && !isRefKey {
 		return ref{}, "", false
 	}
@@ -713,6 +739,23 @@ func asRef(n *Node, m map[string]any, path []string) (ref, string, bool) {
 	case "extensionRef": // the same, in the v1alpha2 InferencePool
 		if kind == "" && n.Kind == "InferencePool" {
 			kind = "Service"
+		}
+	// Keys whose name does not say the kind, or says a wrong one.
+	case "configMapKeyRef", "schemaRef": // an env var from a ConfigMap key, the schema of an OpenAPI MCP target
+		if kind == "" {
+			kind = "ConfigMap"
+		}
+	case "certificateKeyPairRef": // without a group it can only be a Secret
+		if kind == "" {
+			kind = "Secret"
+		}
+	case "wafServerRef": // kind defaults to Service
+		if kind == "" {
+			kind = "Service"
+		}
+	case "storeRef": // an external secret store is defined in the Helm values, not as an object
+		if kind == "" {
+			return ref{}, "", false
 		}
 	}
 	if kind == "" {
@@ -772,15 +815,17 @@ var categories = map[string]string{
 	"auth": "identity", "tokenExchange": "identity", "entTokenExchange": "identity",
 	"entConnector": "identity", "entCrossAppAccess": "identity", "entElicitation": "identity",
 	"workloadIdentity": "identity", "entAws": "identity",
+	"entWptEnforcement": "authn", // proof tokens of the calling workload
 
 	"tls": "security", "cors": "security", "csrf": "security", "proxyProtocol": "security",
-	"validation": "security",
+	"validation": "security", "options": "security", // BackendTLSPolicy
 
 	"tracing": "observability", "accessLog": "observability", "metrics": "observability",
 
 	"extProc": "extension", "entPlugin": "extension",
 
 	"http": "connection", "tcp": "connection", "connect": "connection", "tunnel": "connection",
+	"entBatch": "connection",
 }
 
 func features(m map[string]any, path, prefix string) []Feature {

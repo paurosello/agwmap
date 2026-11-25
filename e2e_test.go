@@ -50,6 +50,7 @@ var leaks = []string{
 	"123456789012", "2600:1f18", "203.0.113.77", // account id, addresses
 	"jane.doe",                                           // the user named in a "forbidden" warning
 	"search.hairpin", "tickets.hairpin", "repos.hairpin", // hairpin.yaml: Services that nothing names
+	"fld-batch-jobs", "fld-guard", "beta.fld", // fields.yaml: a storage bucket, a Bedrock guardrail, a Service that nothing names
 }
 
 // cluster is the fake API server.
@@ -604,6 +605,38 @@ spec:
 	}
 }
 
+// fields.yaml, rendered with -from: the edges and settings of fields that change
+// where a request goes.
+func fieldsGraph(t *testing.T) (map[string]*Node, map[string]Edge) {
+	t.Helper()
+	file, err := filepath.Abs("testdata/fields.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := graphOf(t, mustRun(t, "/nonexistent", "-from", file, "-o", "-"))
+	nodes, edges := map[string]*Node{}, map[string]Edge{}
+	for _, n := range g.Nodes {
+		nodes[n.ID] = n
+	}
+	for _, e := range g.Edges {
+		edges[e.From+" -> "+e.To+" "+e.Type] = e
+	}
+	return nodes, edges
+}
+
+func TestDefaultGateways(t *testing.T) {
+	_, edges := fieldsGraph(t)
+	const gw, rt = "gateway.networking.k8s.io/Gateway/fld-infra/", "gateway.networking.k8s.io/HTTPRoute/fld/"
+	if e, ok := edges[rt+"menu -> "+gw+"commons parent"]; !ok || e.Path != "spec.useDefaultGateways" {
+		t.Errorf("menu asks for the default gateways and is not attached to commons: %+v", e)
+	}
+	for _, k := range []string{rt + "menu -> " + gw + "closed parent", rt + "quiet -> " + gw + "commons parent"} {
+		if _, ok := edges[k]; ok {
+			t.Errorf("unexpected edge %s", k)
+		}
+	}
+}
+
 func diff(want, got []string) string {
 	var b strings.Builder
 	for _, s := range want {
@@ -989,5 +1022,76 @@ func TestUsageErrors(t *testing.T) {
 	}
 	if got := mustRun(t, c.kubeconfig, "-version"); strings.TrimSpace(got) == "" {
 		t.Error("-version prints nothing")
+	}
+}
+
+// References whose key does not name their kind, or names a wrong one.
+func TestReferenceKinds(t *testing.T) {
+	nodes, edges := fieldsGraph(t)
+	const ent = "enterpriseagentgateway.solo.io/"
+	for from, to := range map[string]string{
+		ent + "EnterpriseAgentgatewayParameters/fld/knobs": "/ConfigMap/fld/proxy-settings",
+		ent + "EnterpriseAgentgatewayBackend/fld/catalog":  "/ConfigMap/fld/orders-openapi",
+		ent + "EnterpriseAgentgatewayPolicy/fld/guarded":   "/Secret/fld/menu-client-cert",
+	} {
+		if _, ok := edges[from+" -> "+to+" ref"]; !ok {
+			t.Errorf("no ref edge %s -> %s", from, to)
+		}
+	}
+	if _, ok := edges[ent+"EnterpriseAgentgatewayPolicy/fld/guarded -> /Service/fld/waf-engine ref"]; !ok {
+		t.Error("the WAF server without a kind is not a Service")
+	}
+	for id, n := range nodes {
+		if n.External && slices.Contains([]string{"ConfigMapKey", "Schema", "Store", "CertificateKeyPair", "WafServer"}, n.Kind) {
+			t.Errorf("a reference became a node of a kind that does not exist: %s", id)
+		}
+		if n.External && n.Name == "team-vault" {
+			t.Errorf("the secret store of an external secret became a node: %s", id)
+		}
+	}
+}
+
+// Every setting of a policy is labelled by what it does: none falls to "other".
+func TestFeatureCategories(t *testing.T) {
+	nodes, _ := fieldsGraph(t)
+	for _, id := range []string{
+		"enterpriseagentgateway.solo.io/EnterpriseAgentgatewayPolicy/fld-infra/proof",
+		"gateway.networking.k8s.io/BackendTLSPolicy/fld/menu-tls",
+	} {
+		n := nodes[id]
+		if n == nil || len(n.Features) == 0 {
+			t.Fatalf("%s has no features", id)
+		}
+		for _, f := range n.Features {
+			if f.Category == "other" {
+				t.Errorf("%s: %s has no category", id, f.Key)
+			}
+		}
+	}
+}
+
+// ConfigMaps named under a configMap key: the rules of a WAF policy, the model catalog of parameters.
+func TestConfigMapReferences(t *testing.T) {
+	_, edges := fieldsGraph(t)
+	const waf, params = "waf.solo.io/WAFPolicy/fld/menu-waf", "enterpriseagentgateway.solo.io/EnterpriseAgentgatewayParameters/fld/knobs"
+	for _, k := range []string{
+		waf + " -> /ConfigMap/fld/waf-engine-settings ref",
+		waf + " -> /ConfigMap/fld/waf-crs-settings ref",
+		waf + " -> /ConfigMap/fld-infra/waf-menu-rules ref",
+		params + " -> /ConfigMap/fld/model-prices ref",
+		"enterpriseagentgateway.solo.io/EnterpriseAgentgatewayPolicy/fld/guarded -> " + waf + " ref",
+	} {
+		if _, ok := edges[k]; !ok {
+			t.Errorf("no edge %s", k)
+		}
+	}
+}
+
+// Batch inference of an LLM backend is one of its settings.
+func TestBatchBackend(t *testing.T) {
+	nodes, _ := fieldsGraph(t)
+	n := nodes["enterpriseagentgateway.solo.io/EnterpriseAgentgatewayBackend/fld/pantry"]
+	if n == nil || !slices.Contains(n.Features, Feature{Category: "connection", Key: "entBatch", Path: "spec.entBatch"}) {
+		t.Errorf("the batch setting of pantry is not a feature: %+v", n)
 	}
 }

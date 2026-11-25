@@ -1,0 +1,222 @@
+# Fields that change where a request goes or what a card says: default gateways,
+# references whose kind is not in the key's name, gateway-wide TLS and listener
+# filters, and the per-target and per-provider settings of backends.
+#
+# A default gateway (Gateway API experimental): a route that asks for the scope
+# attaches to it without a parentRef; one that does not ask, or asks for None,
+# does not. The other gateway claims no scope.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: commons, namespace: fld-infra}
+#
+# It also validates client certificates (a default, and its own for port 8443),
+# presents a certificate to backends, and sets TLS options on a listener.
+spec:
+  gatewayClassName: fld
+  defaultScope: All
+  allowedListeners: {namespaces: {from: Same}}
+  tls:
+    frontend:
+      default:
+        validation: {caCertificateRefs: [{group: "", kind: ConfigMap, name: partner-ca}]}
+      perPort:
+      - port: 8443
+        tls:
+          validation: {mode: AllowInsecureFallback, caCertificateRefs: [{group: "", kind: ConfigMap, name: kiosk-ca}]}
+    backend:
+      clientCertificateRef: {name: commons-upstream}
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    allowedRoutes: {namespaces: {from: All}}
+    tls:
+      certificateRefs: [{name: commons-cert}]
+      options: {example.com/min-version: "1.3"}
+    # Checked on every request of the listener, before any route.
+    filters:
+      requests:
+      - type: ExternalAuth
+        externalAuth: {protocol: HTTP, backendRef: {name: door-check, port: 9001}, http: {path: /check}}
+  - name: kiosk
+    protocol: HTTPS
+    port: 8443
+    allowedRoutes: {namespaces: {from: All}}
+    tls: {certificateRefs: [{name: commons-cert}]}
+  - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+  - {name: inside, protocol: HTTP, port: 8080}
+---
+# A listener set whose listener has a filter of its own.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: {name: annex, namespace: fld-infra}
+spec:
+  parentRef: {name: commons}
+  listeners:
+  - name: annex
+    protocol: HTTP
+    port: 8081
+    allowedRoutes: {namespaces: {from: All}}
+    filters:
+      requests:
+      - type: ExtensionRef
+        extensionRef: {group: example.com, kind: Stamp, name: annex-stamp}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: closed, namespace: fld-infra}
+spec:
+  gatewayClassName: fld
+  listeners:
+  - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: menu, namespace: fld}
+spec:
+  useDefaultGateways: All
+  rules:
+  - matches: [{path: {value: /mcp}}]
+    backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: catalog}]
+  - matches: [{path: {value: /v1}}]
+    backendRefs: [{group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: pantry}]
+  - matches: [{path: {value: /v2}}]
+    backendRefs: [{group: agentgateway.dev, kind: AgentgatewayBackend, name: larder}]
+  - backendRefs: [{name: menu, port: 8080}]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: quiet, namespace: fld}
+spec:
+  useDefaultGateways: None
+  rules:
+  - backendRefs: [{name: quiet, port: 8080}]
+---
+# References whose key does not name their kind: an env var from a ConfigMap key,
+# the schema of an OpenAPI MCP target, a client certificate and a WAF server
+# without a kind. A secret store is not an object, so storeRef refers to nothing.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayParameters
+metadata: {name: knobs, namespace: fld}
+spec:
+  env:
+  - name: LOG_FORMAT
+    valueFrom: {configMapKeyRef: {name: proxy-settings, key: log-format}}
+  modelCatalog:
+    sources:
+    - configMap: {name: model-prices}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: catalog, namespace: fld}
+spec:
+  entMcp:
+    targets:
+    - name: orders
+      static:
+        host: orders.fld.svc.cluster.local
+        port: 8080
+        openAPI: {schemaRef: {name: orders-openapi}}
+    # Only for some requests (a CEL condition).
+    - name: beta
+      condition: request.headers["x-beta"] == "on"
+      static: {host: beta.fld.svc.cluster.local, port: 8080}
+    # A composed tool that calls an HTTP endpoint and a tool of other backends.
+    - name: reorder
+      custom:
+        description: Reorders the last order
+        inputSchema: {type: object}
+        output: "{{ steps.place.result }}"
+        steps:
+        - name: last
+          http: {backendRef: {group: "", kind: Service, name: orders, port: 8080}, method: GET, path: /orders/last}
+        - name: place
+          mcp: {tool: place_order, backendRef: {group: enterpriseagentgateway.solo.io, kind: EnterpriseAgentgatewayBackend, name: kitchen}}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayExternalSecret
+metadata: {name: vault-key, namespace: fld}
+spec:
+  storeRef: {name: team-vault}
+  data:
+  - materializedKey: Authorization
+    remoteRef: {key: menu-api-key}
+---
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: guarded, namespace: fld}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: menu}]
+  traffic:
+    entWAF: {wafServerRef: {name: waf-engine, port: 9000}, wafPolicyRef: {name: menu-waf}}
+  backend:
+    entTokenExchange:
+      entra:
+        tenantId: fld-tenant
+        scopes: [api://menu/.default]
+        backendRef: {name: entra-login, port: 443}
+        clientAuth:
+          clientId: fld-client
+          certificateKeyPairRef: {name: menu-client-cert}
+---
+# A gateway policy that traffic policies on its routes cannot override, with
+# a setting that was not labelled before; TLS options to a backend.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayPolicy
+metadata: {name: proof, namespace: fld-infra}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: commons}]
+  strategy: {inheritance: Override}
+  traffic:
+    entWptEnforcement: {mode: RequireProof}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata: {name: menu-tls, namespace: fld}
+spec:
+  targetRefs: [{group: "", kind: Service, name: menu}]
+  validation: {hostname: menu.fld.svc.cluster.local, wellKnownCACertificates: System}
+  options: {example.com/min-version: "1.3"}
+---
+# WAF rules from ConfigMaps, named without a Ref key.
+apiVersion: waf.solo.io/v1alpha1
+kind: WAFPolicy
+metadata: {name: menu-waf, namespace: fld}
+spec:
+  ruleEngineSettings:
+    configMap: {name: waf-engine-settings, namespace: fld, keys: [engine.conf]}
+  coreRuleSet:
+    settings:
+      configMap: {name: waf-crs-settings, namespace: fld, keys: [crs.conf]}
+  customDirectives:
+  - configMap: {name: waf-menu-rules, namespace: fld-infra, keys: [menu.conf]}
+---
+# LLM providers in priority groups, and the OpenAI batch API served by Bedrock.
+apiVersion: enterpriseagentgateway.solo.io/v1alpha1
+kind: EnterpriseAgentgatewayBackend
+metadata: {name: pantry, namespace: fld}
+spec:
+  ai:
+    groups:
+    - providers:
+      - name: first
+        openai: {model: gpt-4o-mini, moderation: {model: omni-moderation-latest}}
+        policies:
+          auth: {secretRef: {name: first-key}}
+          ai: {modelAliases: {fast: gpt-4o-mini}}
+      - name: second
+        bedrock:
+          model: claude-sonnet
+          region: eu-west-1
+          guardrail: {identifier: fld-guard, version: "1"}
+  entBatch:
+    bedrock: {bucket: fld-batch-jobs, roleArn: "arn:aws:iam::000000000000:role/fld-batch"}
+---
+# One LLM provider, with the moderation of the provider's service.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: larder, namespace: fld}
+spec:
+  ai:
+    provider:
+      openai: {model: gpt-4o-mini, moderation: {model: omni-moderation-latest}}

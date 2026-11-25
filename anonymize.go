@@ -22,7 +22,8 @@ import (
 //   - URLs: the host, every path segment that is not a well-known word
 //     (/v1, /.well-known, /oauth2 ...), and the whole query and fragment
 //   - e-mail addresses, GUIDs, AWS account ids and resource names in ARNs,
-//     Google Cloud project ids, client/tenant/account/project id fields
+//     Google Cloud project ids, client/tenant/account/project id fields, storage
+//     bucket names, Bedrock guardrail ids
 //   - inline credentials: values of secret-like keys and headers, bearer and
 //     basic tokens, JWTs, API keys with a known prefix, PEM blocks
 //   - gRPC service names in route matches
@@ -68,7 +69,7 @@ var (
 	// "inline" holds a credential or key under these parents (auth.key.inline, jwks.inline),
 	// and plain configuration elsewhere (WAF directives).
 	inlineParentRe = regexp.MustCompile(`(?i)(auth|key|secret|credential|tls|cert|password|jwks|token)`)
-	idKeyRe        = regexp.MustCompile(`(?i)^(client_?id|project_?id|account_?id|tenant_?id|subscription_?id|organization_?id|resourceName|projectName)$`)
+	idKeyRe        = regexp.MustCompile(`(?i)^(client_?id|project_?id|account_?id|tenant_?id|subscription_?id|organization_?id|resourceName|projectName|bucket(_?name)?)$`)
 	// {name: <header>, value: ...} pairs whose value is a credential or a host.
 	secretHeaderRe = regexp.MustCompile(`(?i)^(proxy-)?authorization$|cookie$|api[_-]?key|secret|password|^token$|^x-.*-token$`)
 	hostHeaderRe   = regexp.MustCompile(`(?i)^(host|:authority|x-forwarded-host)$`)
@@ -295,6 +296,8 @@ func (a *anonymizer) scalar(key, parent, s string) string {
 		return a.name(key, s)
 	case key == "service" && parent == "method": // gRPC: com.company.orders.v1.Orders
 		return a.name("grpc", s)
+	case key == "identifier" && parent == "guardrail": // an AWS Bedrock guardrail id or ARN
+		return a.name("guardrail", s)
 	}
 	if (hostKeyRe.MatchString(key) || hostKeyRe.MatchString(parent)) && bareHostRe.MatchString(s) {
 		return a.hostPort(s)

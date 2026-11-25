@@ -176,8 +176,8 @@ kind (`v1beta1`, `v1alpha2`, `v1alpha3`) are read the same way.
 | Kind | Group | In the map |
 |---|---|---|
 | GatewayClass | `gateway.networking.k8s.io` | Under the gateway that uses it, with its parameters and the policies attached to it |
-| Gateway | `gateway.networking.k8s.io` | Start of a flow, one per listener: protocol, port, hostname, TLS, certificates, the listener's status |
-| ListenerSet | `gateway.networking.k8s.io` | Adds its listeners to the parent gateway; flagged when the gateway's `allowedListeners` does not admit it |
+| Gateway | `gateway.networking.k8s.io` | Start of a flow, one per listener: protocol, port, hostname, TLS with its certificates and options, the client certificate validation and the certificate presented to backends that the gateway sets (`spec.tls`), the filters of the listener with what they refer to, the listener's status |
+| ListenerSet | `gateway.networking.k8s.io` | Adds its listeners, with their filters, to the parent gateway; flagged when the gateway's `allowedListeners` does not admit it |
 | XListenerSet | `gateway.networking.x-k8s.io` | The same (Gateway API v1.3 and v1.4) |
 | HTTPRoute | `gateway.networking.k8s.io` | Route: hostnames, per rule the matches, filters, timeouts, retry and backends with weight and port |
 | GRPCRoute | `gateway.networking.k8s.io` | Route, with gRPC service and method matches |
@@ -191,8 +191,10 @@ kind (`v1beta1`, `v1alpha2`, `v1alpha3`) are read the same way.
 | XBackend | `gateway.networking.x-k8s.io` | Backend, with its hostname or pod selector |
 | XMesh | `gateway.networking.x-k8s.io` | Listed under "Outside the flow": it is not on a request path |
 
-A route attaches to a listener by section name, port, protocol, `allowedRoutes` and hostname. Routes
-can also be attached to a Service (mesh) or to another route (delegation).
+A route attaches to a listener by section name, port, protocol, `allowedRoutes` and hostname. A route
+with `useDefaultGateways` attaches to every gateway whose `defaultScope` is the same, which is marked
+"default gateway", and is then checked the same way. Routes can also be attached to a Service (mesh)
+or to another route (delegation).
 
 ### Inference extension
 
@@ -204,24 +206,24 @@ can also be attached to a Service (mesh) or to another route (delegation).
 
 ### agentgateway
 
-Checked against Solo Enterprise for agentgateway v2026.11.0.
+Checked against Solo Enterprise for agentgateway v2026.11.1-patch.0.
 
 | Kind | Group | In the map |
 |---|---|---|
-| AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does |
-| AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS |
+| AgentgatewayPolicy | `agentgateway.dev` | Policy on the gateway, listener, route or backend it targets, each setting labelled by what it does, with its phase and inheritance (`strategy.inheritance`) as badges |
+| AgentgatewayBackend | `agentgateway.dev` | Backend, with its upstream targets: LLM providers, MCP servers, A2A, static hosts, AWS. An MCP target with a condition is marked conditional; a custom MCP target (a composed tool) shows its number of steps and the backends they call. In the summary, each LLM provider lists its own policies and its provider-side guardrails, on the line of the backend when it is the only one |
 | AgentgatewayModel | `agentgateway.dev` | Backend of the route it names, with the model it matches |
 | AgentgatewayParameters | `agentgateway.dev` | Under the gateway or class that uses it |
 | EnterpriseAgentgatewayPolicy | `enterpriseagentgateway.solo.io` | As AgentgatewayPolicy, with the enterprise settings. A native plugin it turns on (`traffic.entPlugin`, also `conditional`) shows its instance name, library, order and config keys, and is flagged when the gateway does not mount its library |
-| EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend |
-| EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it, with the native plugins it mounts (`spec.plugins`: image or Secret); a plugin that no policy turns on for the gateway is flagged |
+| EnterpriseAgentgatewayBackend | `enterpriseagentgateway.solo.io` | As AgentgatewayBackend, with the batch inference it serves (`entBatch`) as a row and a Connection setting |
+| EnterpriseAgentgatewayParameters | `enterpriseagentgateway.solo.io` | Under the gateway or class that uses it, with the ConfigMap of its model catalog and the native plugins it mounts (`spec.plugins`: image or Secret); a plugin that no policy turns on for the gateway is flagged |
 | EnterpriseAgentgatewayBudget | `enterpriseagentgateway.solo.io` | Under the policy that enforces it |
 | EnterpriseAgentgatewayExternalSecret | `enterpriseagentgateway.solo.io` | Under the object that refers to it |
 | EnterpriseAgentgatewayRBACPolicy, EnterpriseAgentgatewayRoleBinding | `enterpriseagentgateway.solo.io` | Listed under "Outside the flow": access to the management UI, not to traffic |
 | EnterpriseListenerSet | `enterprise.solo.io` | Adds its listeners to the parent gateway |
 | AuthConfig | `extauth.solo.io` | Under the policy that refers to it |
 | RateLimitConfig | `ratelimit.solo.io` | Under the policy that refers to it |
-| WAFPolicy | `waf.solo.io` | Under the policy that refers to it |
+| WAFPolicy | `waf.solo.io` | Under the policy that refers to it, with the ConfigMaps its rules come from |
 
 ## What a capture keeps
 
@@ -234,7 +236,7 @@ With anonymization, which is the default:
 |---|---|
 | Hostnames, wherever they appear, and IPv4 and IPv6 addresses | Names and namespaces of the objects |
 | URLs: the host, path segments other than well-known words such as `/v1` or `/oauth2`, the query string | Names of what they refer to: Secrets, Services, models |
-| E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
+| E-mail addresses, GUIDs, AWS account ids and ARN resource names, Google Cloud project ids, client and tenant ids, storage bucket names, Bedrock guardrail ids | Label and annotation keys under the gateway domains, and the labels a policy selects its targets by |
 | Inline credentials: secret-like fields and headers, bearer and basic tokens, JWTs, API keys, PEM blocks | Free text: descriptions, CEL expressions, header names, paths in route matches |
 | Every value of the config of a native plugin (`entPlugin.config`): only its keys are kept | Plugin names, and the path and tag of a plugin image (its registry is a hostname) |
 | Labels and annotations outside the gateway domains listed in [`minimize.go`](minimize.go) | Model names, regions, ports, protocols |
